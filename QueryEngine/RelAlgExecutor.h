@@ -17,14 +17,15 @@
 #ifndef QUERYENGINE_RELALGEXECUTOR_H
 #define QUERYENGINE_RELALGEXECUTOR_H
 
-#include "InputMetadata.h"
+#include "../Shared/scope.h"
+#include "Distributed/AggregatedResult.h"
 #include "Execute.h"
+#include "InputMetadata.h"
+#include "JoinFilterPushDown.h"
 #include "QueryRewrite.h"
 #include "RelAlgExecutionDescriptor.h"
 #include "SpeculativeTopN.h"
 #include "StreamingTopN.h"
-#include "../Shared/scope.h"
-#include "Distributed/AggregatedResult.h"
 
 #include <ctime>
 #include <sstream>
@@ -52,21 +53,33 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
   using RowSetPtrSharedPtr = std::shared_ptr<RowSetPtr>;
 
   RelAlgExecutor(Executor* executor, const Catalog_Namespace::Catalog& cat)
-      : StorageIOFacility(executor, cat), executor_(executor), cat_(cat), now_(0), queue_time_ms_(0) {}
+      : StorageIOFacility(executor, cat)
+      , executor_(executor)
+      , cat_(cat)
+      , now_(0)
+      , queue_time_ms_(0) {}
 
   ExecutionResult executeRelAlgQuery(const std::string& query_ra,
                                      const CompilationOptions& co,
                                      const ExecutionOptions& eo,
                                      RenderInfo* render_info);
 
+  ExecutionResult executeRelAlgQueryWithFilterPushDown(
+      std::vector<RaExecutionDesc>& ed_list,
+      const CompilationOptions& co,
+      const ExecutionOptions& eo,
+      RenderInfo* render_info,
+      const int64_t queue_time_ms);
+
   FirstStepExecutionResult executeRelAlgQueryFirstStep(const RelAlgNode* ra,
                                                        const CompilationOptions& co,
                                                        const ExecutionOptions& eo,
                                                        RenderInfo* render_info);
 
-  void prepareLeafExecution(const AggregatedColRange& agg_col_range,
-                            const StringDictionaryGenerations& string_dictionary_generations,
-                            const TableGenerations& table_generations);
+  void prepareLeafExecution(
+      const AggregatedColRange& agg_col_range,
+      const StringDictionaryGenerations& string_dictionary_generations,
+      const TableGenerations& table_generations);
 
   ExecutionResult executeRelAlgSubQuery(const RexSubQuery* subquery,
                                         const CompilationOptions& co,
@@ -83,9 +96,13 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
     CHECK(it_ok.second);
   }
 
-  void registerSubquery(RexSubQuery* subquery) noexcept { subqueries_.push_back(subquery); }
+  void registerSubquery(std::shared_ptr<RexSubQuery> subquery) noexcept {
+    subqueries_.push_back(subquery);
+  }
 
-  const std::vector<RexSubQuery*>& getSubqueries() const noexcept { return subqueries_; };
+  const std::vector<std::shared_ptr<RexSubQuery>>& getSubqueries() const noexcept {
+    return subqueries_;
+  };
 
   AggregatedColRange computeColRangesCache(const RelAlgNode* ra);
 
@@ -94,6 +111,8 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
   TableGenerations computeTableGenerations(const RelAlgNode* ra);
 
   Executor* getExecutor() const;
+
+  void cleanupPostExecution();
 
  private:
   ExecutionResult executeRelAlgQueryNoRetry(const std::string& query_ra,
@@ -176,6 +195,8 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
     const RelAlgNode* body;
     const size_t max_groups_buffer_entry_guess;
     std::unique_ptr<QueryRewriter> query_rewriter;
+    const std::vector<size_t> input_permutation;
+    const std::vector<size_t> left_deep_join_input_sizes;
   };
 
   WorkUnit createSortInputWorkUnit(const RelSort*, const bool just_explain);
@@ -198,13 +219,17 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
                               const CompilationOptions& co,
                               const ExecutionOptions& eo);
 
-  bool isRowidLookup(const WorkUnit& work_unit);
+  FilterSelectivity getFilterSelectivity(
+      const std::vector<std::shared_ptr<Analyzer::Expr>>& filter_expressions,
+      const CompilationOptions& co,
+      const ExecutionOptions& eo);
 
-  ExecutionResult renderWorkUnit(const RelAlgExecutor::WorkUnit& work_unit,
-                                 const std::vector<TargetMetaInfo>& targets_meta,
-                                 RenderInfo* render_info,
-                                 const int32_t error_code,
-                                 const int64_t queue_time_ms);
+  std::vector<PushedDownFilterInfo> selectFiltersToBePushedDown(
+      const RelAlgExecutor::WorkUnit& work_unit,
+      const CompilationOptions& co,
+      const ExecutionOptions& eo);
+
+  bool isRowidLookup(const WorkUnit& work_unit);
 
   void executeUnfoldedMultiJoin(const RelAlgNode* user,
                                 RaExecutionDesc& exec_desc,
@@ -229,15 +254,25 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
   WorkUnit createModifyCompoundWorkUnit(const RelCompound* compound,
                                         const SortInfo& sort_info,
                                         const bool just_explain);
-  WorkUnit createCompoundWorkUnit(const RelCompound*, const SortInfo&, const bool just_explain);
+  WorkUnit createCompoundWorkUnit(const RelCompound*,
+                                  const SortInfo&,
+                                  const bool just_explain);
 
-  WorkUnit createAggregateWorkUnit(const RelAggregate*, const SortInfo&, const bool just_explain);
+  WorkUnit createAggregateWorkUnit(const RelAggregate*,
+                                   const SortInfo&,
+                                   const bool just_explain);
 
-  WorkUnit createModifyProjectWorkUnit(const RelProject* project, const SortInfo& sort_info, const bool just_explain);
+  WorkUnit createModifyProjectWorkUnit(const RelProject* project,
+                                       const SortInfo& sort_info,
+                                       const bool just_explain);
 
-  WorkUnit createProjectWorkUnit(const RelProject*, const SortInfo&, const bool just_explain);
+  WorkUnit createProjectWorkUnit(const RelProject*,
+                                 const SortInfo&,
+                                 const bool just_explain);
 
-  WorkUnit createFilterWorkUnit(const RelFilter*, const SortInfo&, const bool just_explain);
+  WorkUnit createFilterWorkUnit(const RelFilter*,
+                                const SortInfo&,
+                                const bool just_explain);
 
   WorkUnit createJoinWorkUnit(const RelJoin*, const SortInfo&, const bool just_explain);
 
@@ -251,7 +286,7 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
     CHECK(it_ok.second);
   }
 
-  void handleNop(const RelAlgNode*);
+  void handleNop(RaExecutionDesc& ed);
 
   JoinQualsPerNestingLevel translateLeftDeepJoinFilter(
       const RelLeftDeepInnerJoin* join,
@@ -272,7 +307,7 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
   TemporaryTables temporary_tables_;
   time_t now_;
   std::vector<std::shared_ptr<Analyzer::Expr>> target_exprs_owned_;  // TODO(alex): remove
-  std::vector<RexSubQuery*> subqueries_;
+  std::vector<std::shared_ptr<RexSubQuery>> subqueries_;
   std::unordered_map<unsigned, AggregatedResult> leaf_results_;
   int64_t queue_time_ms_;
   static SpeculativeTopNBlacklist speculative_topn_blacklist_;

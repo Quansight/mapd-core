@@ -99,7 +99,9 @@ class ResultSetStorage {
                                         const size_t start_index,
                                         const size_t end_index) const;
 
-  void copyKeyColWise(const size_t entry_idx, int8_t* this_buff, const int8_t* that_buff) const;
+  void copyKeyColWise(const size_t entry_idx,
+                      int8_t* this_buff,
+                      const int8_t* that_buff) const;
 
   void reduceOneEntryNoCollisionsRowWise(const size_t i,
                                          int8_t* this_buff,
@@ -156,7 +158,8 @@ class ResultSetStorage {
 
   void initializeColWise() const;
 
-  // TODO(alex): remove the following two methods, see comment about count_distinct_sets_mapping_.
+  // TODO(alex): remove the following two methods, see comment about
+  // count_distinct_sets_mapping_.
   void addCountDistinctSetPointerMapping(const int64_t remote_ptr, const int64_t ptr);
 
   int64_t mappedPtr(const int64_t) const;
@@ -241,8 +244,7 @@ class ResultSet {
 
   ResultSet(const std::string& explanation);
 
-  ResultSet(const std::string& image_bytes,
-            int64_t queue_time_ms,
+  ResultSet(int64_t queue_time_ms,
             int64_t render_time_ms,
             const std::shared_ptr<RowSetMemoryOwner> row_set_mem_owner);
 
@@ -256,7 +258,8 @@ class ResultSet {
 
   const ResultSetStorage* allocateStorage(const std::vector<int64_t>&) const;
 
-  std::vector<TargetValue> getNextRow(const bool translate_strings, const bool decimal_to_double) const;
+  std::vector<TargetValue> getNextRow(const bool translate_strings,
+                                      const bool decimal_to_double) const;
 
   size_t getCurrentRowBufferIndex() const;
 
@@ -334,13 +337,19 @@ class ResultSet {
 
   void initializeStorage() const;
 
-  void holdChunks(const std::list<std::shared_ptr<Chunk_NS::Chunk>>& chunks) { chunks_ = chunks; }
+  void holdChunks(const std::list<std::shared_ptr<Chunk_NS::Chunk>>& chunks) {
+    chunks_ = chunks;
+  }
   void holdChunkIterators(const std::shared_ptr<std::list<ChunkIter>> chunk_iters) {
     chunk_iters_.push_back(chunk_iters);
   }
-  void holdLiterals(std::vector<int8_t>& literal_buff) { literal_buffers_.push_back(std::move(literal_buff)); }
+  void holdLiterals(std::vector<int8_t>& literal_buff) {
+    literal_buffers_.push_back(std::move(literal_buff));
+  }
 
-  std::shared_ptr<RowSetMemoryOwner> getRowSetMemOwner() const { return row_set_mem_owner_; }
+  std::shared_ptr<RowSetMemoryOwner> getRowSetMemOwner() const {
+    return row_set_mem_owner_;
+  }
 
   const std::vector<uint32_t>& getPermutationBuffer() const;
 
@@ -353,7 +362,8 @@ class ResultSet {
     std::shared_ptr<arrow::Buffer> records;
   };
 
-  SerializedArrowOutput getSerializedArrowOutput(const std::vector<std::string>& col_names) const;
+  SerializedArrowOutput getSerializedArrowOutput(
+      const std::vector<std::string>& col_names) const;
 
   ArrowResult getArrowCopy(Data_Namespace::DataMgr* data_mgr,
                            const ExecutorDeviceType device_type,
@@ -362,15 +372,16 @@ class ResultSet {
 
   size_t getLimit();
 
-  enum class GeoReturnType { Double, WktString };
+  enum class GeoReturnType { GeoTargetValue, WktString };
   GeoReturnType getGeoReturnType() const { return geo_return_type_; }
-  void setGeoReturnWKtString() { geo_return_type_ = GeoReturnType::WktString; }
-  void setGeoReturnDouble() { geo_return_type_ = GeoReturnType::Double; }
+  void setGeoReturnType(const GeoReturnType val) { geo_return_type_ = val; }
 
  private:
-  std::vector<TargetValue> getNextRowImpl(const bool translate_strings, const bool decimal_to_double) const;
+  std::vector<TargetValue> getNextRowImpl(const bool translate_strings,
+                                          const bool decimal_to_double) const;
 
-  std::vector<TargetValue> getNextRowUnlocked(const bool translate_strings, const bool decimal_to_double) const;
+  std::vector<TargetValue> getNextRowUnlocked(const bool translate_strings,
+                                              const bool decimal_to_double) const;
 
   std::vector<TargetValue> getRowAt(const size_t index,
                                     const bool translate_strings,
@@ -385,17 +396,20 @@ class ResultSet {
 
   void radixSortOnCpu(const std::list<Analyzer::OrderEntry>& order_entries) const;
 
-  static bool isNull(const SQLTypeInfo& ti, const InternalTargetValue& val, const bool float_argument_input);
+  static bool isNull(const SQLTypeInfo& ti,
+                     const InternalTargetValue& val,
+                     const bool float_argument_input);
 
-  TargetValue getTargetValueFromBufferRowwise(int8_t* rowwise_target_ptr,
-                                              int8_t* keys_ptr,
-                                              const size_t entry_buff_idx,
-                                              const TargetInfo& target_info,
-                                              const size_t target_logical_idx,
-                                              const size_t slot_idx,
-                                              const bool translate_strings,
-                                              const bool decimal_to_double,
-                                              const bool fixup_count_distinct_pointers) const;
+  TargetValue getTargetValueFromBufferRowwise(
+      int8_t* rowwise_target_ptr,
+      int8_t* keys_ptr,
+      const size_t entry_buff_idx,
+      const TargetInfo& target_info,
+      const size_t target_logical_idx,
+      const size_t slot_idx,
+      const bool translate_strings,
+      const bool decimal_to_double,
+      const bool fixup_count_distinct_pointers) const;
 
   TargetValue getTargetValueFromBufferColwise(const int8_t* col1_ptr,
                                               const int8_t compact_sz1,
@@ -429,7 +443,8 @@ class ResultSet {
     int8_t* ptr2;
     int8_t compact_sz2;
 
-    VarlenTargetPtrPair() : ptr1(nullptr), compact_sz1(0), ptr2(nullptr), compact_sz2(0) {}
+    VarlenTargetPtrPair()
+        : ptr1(nullptr), compact_sz1(0), ptr2(nullptr), compact_sz2(0) {}
   };
   TargetValue makeGeoTargetValue(const VarlenTargetPtrPair& coords,
                                  const VarlenTargetPtrPair& ring_sizes,
@@ -444,12 +459,14 @@ class ResultSet {
     const size_t storage_idx;
   };
 
-  InternalTargetValue getColumnInternal(const int8_t* buff,
-                                        const size_t entry_idx,
-                                        const size_t target_logical_idx,
-                                        const StorageLookupResult& storage_lookup_result) const;
+  InternalTargetValue getColumnInternal(
+      const int8_t* buff,
+      const size_t entry_idx,
+      const size_t target_logical_idx,
+      const StorageLookupResult& storage_lookup_result) const;
 
-  InternalTargetValue getVarlenOrderEntry(const int64_t str_ptr, const size_t str_len) const;
+  InternalTargetValue getVarlenOrderEntry(const int64_t str_ptr,
+                                          const size_t str_len) const;
 
   int64_t lazyReadInt(const int64_t ival,
                       const size_t target_logical_idx,
@@ -463,36 +480,136 @@ class ResultSet {
 
   StorageLookupResult findStorage(const size_t entry_idx) const;
 
+  struct TargetOffsets {
+    const int8_t* ptr1;
+    const size_t compact_sz1;
+    const int8_t* ptr2;
+    const size_t compact_sz2;
+  };
+
+  struct RowWiseTargetAccessor {
+    RowWiseTargetAccessor(const ResultSet* result_set)
+        : result_set_(result_set)
+        , row_bytes_(get_row_bytes(result_set->query_mem_desc_))
+        , key_width_(result_set_->query_mem_desc_.getEffectiveKeyWidth())
+        , key_bytes_with_padding_(
+              align_to_int64(get_key_bytes_rowwise(result_set->query_mem_desc_))) {
+      initializeOffsetsForStorage();
+    }
+
+    InternalTargetValue getColumnInternal(
+        const int8_t* buff,
+        const size_t entry_idx,
+        const size_t target_logical_idx,
+        const StorageLookupResult& storage_lookup_result) const;
+
+    void initializeOffsetsForStorage();
+
+    inline const int8_t* get_rowwise_ptr(const int8_t* buff,
+                                         const size_t entry_idx) const {
+      return buff + entry_idx * row_bytes_;
+    }
+
+    std::vector<std::vector<TargetOffsets>> offsets_for_storage_;
+
+    const ResultSet* result_set_;
+
+    // Row-wise iteration
+    const size_t row_bytes_;
+    const size_t key_width_;
+    const size_t key_bytes_with_padding_;
+  };
+
+  struct ColumnWiseTargetAccessor {
+    ColumnWiseTargetAccessor(const ResultSet* result_set) : result_set_(result_set) {
+      initializeOffsetsForStorage();
+    }
+
+    void initializeOffsetsForStorage();
+
+    InternalTargetValue getColumnInternal(
+        const int8_t* buff,
+        const size_t entry_idx,
+        const size_t target_logical_idx,
+        const StorageLookupResult& storage_lookup_result) const;
+
+    std::vector<std::vector<TargetOffsets>> offsets_for_storage_;
+
+    const ResultSet* result_set_;
+  };
+
+  template <typename BUFFER_ITERATOR_TYPE>
+  struct ResultSetComparator {
+    using BufferIteratorType = BUFFER_ITERATOR_TYPE;
+
+    ResultSetComparator(const std::list<Analyzer::OrderEntry>& order_entries,
+                        const bool use_heap,
+                        const ResultSet* result_set)
+        : order_entries_(order_entries)
+        , use_heap_(use_heap)
+        , result_set_(result_set)
+        , buffer_itr_(result_set) {}
+
+    bool operator()(const uint32_t lhs, const uint32_t rhs) const;
+
+    // TODO(adb): make order_entries_ a pointer
+    const std::list<Analyzer::OrderEntry> order_entries_;
+    const bool use_heap_;
+    const ResultSet* result_set_;
+    const BufferIteratorType buffer_itr_;
+  };
+
   std::function<bool(const uint32_t, const uint32_t)> createComparator(
       const std::list<Analyzer::OrderEntry>& order_entries,
-      const bool use_heap) const;
+      const bool use_heap) {
+    if (query_mem_desc_.didOutputColumnar()) {
+      column_wise_comparator_ =
+          std::make_unique<ResultSetComparator<ColumnWiseTargetAccessor>>(
+              order_entries, use_heap, this);
+      return [this](const uint32_t lhs, const uint32_t rhs) -> bool {
+        return (*this->column_wise_comparator_)(lhs, rhs);
+      };
+    } else {
+      row_wise_comparator_ = std::make_unique<ResultSetComparator<RowWiseTargetAccessor>>(
+          order_entries, use_heap, this);
+      return [this](const uint32_t lhs, const uint32_t rhs) -> bool {
+        return (*this->row_wise_comparator_)(lhs, rhs);
+      };
+    }
+  }
 
-  static void topPermutation(std::vector<uint32_t>& to_sort,
-                             const size_t n,
-                             const std::function<bool(const uint32_t, const uint32_t)> compare);
+  static void topPermutation(
+      std::vector<uint32_t>& to_sort,
+      const size_t n,
+      const std::function<bool(const uint32_t, const uint32_t)> compare);
 
   void sortPermutation(const std::function<bool(const uint32_t, const uint32_t)> compare);
 
   std::vector<uint32_t> initPermutationBuffer(const size_t start, const size_t step);
 
-  void parallelTop(const std::list<Analyzer::OrderEntry>& order_entries, const size_t top_n);
+  void parallelTop(const std::list<Analyzer::OrderEntry>& order_entries,
+                   const size_t top_n);
 
-  void baselineSort(const std::list<Analyzer::OrderEntry>& order_entries, const size_t top_n);
+  void baselineSort(const std::list<Analyzer::OrderEntry>& order_entries,
+                    const size_t top_n);
 
   void doBaselineSort(const ExecutorDeviceType device_type,
                       const std::list<Analyzer::OrderEntry>& order_entries,
                       const size_t top_n);
 
-  bool canUseFastBaselineSort(const std::list<Analyzer::OrderEntry>& order_entries, const size_t top_n);
+  bool canUseFastBaselineSort(const std::list<Analyzer::OrderEntry>& order_entries,
+                              const size_t top_n);
 
   Data_Namespace::DataMgr* getDataManager() const;
 
   int getGpuCount() const;
 
-  std::shared_ptr<arrow::RecordBatch> convertToArrow(const std::vector<std::string>& col_names,
-                                                     arrow::ipc::DictionaryMemo& memo) const;
+  std::shared_ptr<arrow::RecordBatch> convertToArrow(
+      const std::vector<std::string>& col_names,
+      arrow::ipc::DictionaryMemo& memo) const;
   std::shared_ptr<const std::vector<std::string>> getDictionary(const int dict_id) const;
-  std::shared_ptr<arrow::RecordBatch> getArrowBatch(const std::shared_ptr<arrow::Schema>& schema) const;
+  std::shared_ptr<arrow::RecordBatch> getArrowBatch(
+      const std::shared_ptr<arrow::Schema>& schema) const;
 
   ArrowResult getArrowCopyOnCpu(const std::vector<std::string>& col_names) const;
   ArrowResult getArrowCopyOnGpu(Data_Namespace::DataMgr* data_mgr,
@@ -510,7 +627,8 @@ class ResultSet {
   using BufferSet = std::set<int64_t>;
   void create_active_buffer_set(BufferSet& count_distinct_active_buffer_set) const;
 
-  int64_t getDistinctBufferRefFromBufferRowwise(int8_t* rowwise_target_ptr, const TargetInfo& target_info) const;
+  int64_t getDistinctBufferRefFromBufferRowwise(int8_t* rowwise_target_ptr,
+                                                const TargetInfo& target_info) const;
 
   const std::vector<TargetInfo> targets_;
   const ExecutorDeviceType device_type_;
@@ -556,6 +674,11 @@ class ResultSet {
   // only used by geo
   GeoReturnType geo_return_type_;
 
+  // comparators used for sorting (note that the actual compare function is accessed using
+  // the createComparator method)
+  std::unique_ptr<ResultSetComparator<RowWiseTargetAccessor>> row_wise_comparator_;
+  std::unique_ptr<ResultSetComparator<ColumnWiseTargetAccessor>> column_wise_comparator_;
+
   friend class ResultSetManager;
 };
 
@@ -574,7 +697,9 @@ class RowSortException : public std::runtime_error {
   RowSortException(const std::string& cause) : std::runtime_error(cause) {}
 };
 
-int64_t lazy_decode(const ColumnLazyFetchInfo& col_lazy_fetch, const int8_t* byte_stream, const int64_t pos);
+int64_t lazy_decode(const ColumnLazyFetchInfo& col_lazy_fetch,
+                    const int8_t* byte_stream,
+                    const int64_t pos);
 
 void fill_empty_key(void* key_ptr, const size_t key_count, const size_t key_width);
 

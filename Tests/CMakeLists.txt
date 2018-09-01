@@ -39,11 +39,13 @@ add_executable(UtilTest UtilTest.cpp)
 add_executable(StorageTest StorageTest.cpp PopulateTableRandom.cpp ScanTable.cpp)
 add_executable(StoragePerfTest StoragePerfTest.cpp PopulateTableRandom.cpp ScanTable.cpp)
 add_executable(ImportTest ImportTest.cpp)
+add_executable(AlterColumnTest AlterColumnTest.cpp)
 add_executable(UpdelStorageTest UpdelStorageTest.cpp)
 add_executable(TopKTest TopKTest.cpp)
 add_executable(TokenCompletionHintsTest TokenCompletionHintsTest.cpp)
 add_executable(MapDQLCommandTest MapDQLCommandTest.cpp)
 add_executable(DBObjectPrivilegesTest DBObjectPrivilegesTest.cpp)
+add_executable(GeoTypesTest Shared/GeoTypesTest.cpp)
 
 target_link_libraries(ProfileTest gtest Shared Calcite QueryEngine ${MAPD_RENDERING_LIBRARIES} CsvImport QueryRunner Parser ${Boost_LIBRARIES} ${Glog_LIBRARIES} ${CMAKE_DL_LIBS} ${CUDA_LIBRARIES} ${PROF_LIBRARIES} ${LLVM_LINKER_FLAGS} ${CURSES_LIBRARIES})
 target_link_libraries(ResultSetTest gtest gtest QueryEngine ${MAPD_RENDERING_LIBRARIES} ${Boost_LIBRARIES} CsvImport QueryRunner Parser DataMgr Chunk ${Boost_LIBRARIES} ${Glog_LIBRARIES} ${CMAKE_DL_LIBS} ${CUDA_LIBRARIES} ${LLVM_LINKER_FLAGS} ${CURSES_LIBRARIES})
@@ -53,9 +55,12 @@ target_link_libraries(StringDictionaryTest StringDictionary gtest ${Boost_LIBRAR
 target_link_libraries(TokenCompletionHintsTest token_completion_hints gtest mapd_thrift ${Boost_LIBRARIES})
 set(EXECUTE_TEST_LIBS gtest QueryRunner ${MAPD_LIBRARIES} ${Boost_LIBRARIES} ${Glog_LIBRARIES} ${CMAKE_DL_LIBS} ${CUDA_LIBRARIES} ${LLVM_LINKER_FLAGS} ${CURSES_LIBRARIES})
 list(APPEND EXECUTE_TEST_LIBS Calcite)
+list(APPEND EXECUTE_TEST_LIBS Calcite mapd_thrift)
+
 target_link_libraries(ExecuteTest ${EXECUTE_TEST_LIBS})
 target_link_libraries(RunQueryLoop ${EXECUTE_TEST_LIBS} bcrypt)
 target_link_libraries(ImportTest gtest ${EXECUTE_TEST_LIBS})
+target_link_libraries(AlterColumnTest gtest ${EXECUTE_TEST_LIBS})
 target_link_libraries(PlanTest gtest ${EXECUTE_TEST_LIBS})
 target_link_libraries(UpdelStorageTest gtest ${EXECUTE_TEST_LIBS})
 target_link_libraries(StorageTest gtest ${EXECUTE_TEST_LIBS})
@@ -63,11 +68,13 @@ target_link_libraries(StoragePerfTest gtest ${EXECUTE_TEST_LIBS})
 target_link_libraries(TopKTest ${EXECUTE_TEST_LIBS})
 target_link_libraries(MapDQLCommandTest gtest ${EXECUTE_TEST_LIBS} ${Boost_LIBRARIES})
 target_link_libraries(DBObjectPrivilegesTest gtest ${EXECUTE_TEST_LIBS} ${Boost_LIBRARIES})
+target_link_libraries(GeoTypesTest gtest ${EXECUTE_TEST_LIBS})
 
 set(TEST_ARGS "--gtest_output=xml:../")
 add_test(PlanTest PlanTest ${TEST_ARGS})
 add_test(UpdelStorageTest UpdelStorageTest ${TEST_ARGS})
 add_test(ImportTest ImportTest ${TEST_ARGS})
+add_test(AlterColumnTest AlterColumnTest ${TEST_ARGS})
 add_test(UtilTest UtilTest ${TEST_ARGS})
 add_test(ExecuteTest ExecuteTest ${TEST_ARGS})
 add_test(ResultSetTest ResultSetTest ${TEST_ARGS})
@@ -80,6 +87,7 @@ add_test(TopKTest TopKTest ${TEST_ARGS})
 add_test(TokenCompletionHintsTest TokenCompletionHintsTest ${TEST_ARGS})
 add_test(MapDQLCommandTest MapDQLCommandTest ${TEST_ARGS})
 add_test(DBObjectPrivilegesTest DBObjectPrivilegesTest ${TEST_ARGS})
+add_test(GeoTypesTest GeoTypesTest ${TEST_ARGS})
 
 # parse s3 credentials
 file(READ aws/s3client.conf S3CLIENT_CONF)
@@ -100,25 +108,35 @@ set(SANITY_TESTS
   ResultSetBaselineRadixSortTest
   StorageTest
   ImportTest
+  AlterColumnTest
   UpdelStorageTest
   TopKTest
   TokenCompletionHintsTest
   MapDQLCommandTest
   DBObjectPrivilegesTest
+  GeoTypesTest
 )
 set_tests_properties(${SANITY_TESTS} PROPERTIES LABELS "sanity")
 
 add_custom_target(sanity_tests
     COMMAND mkdir -p ${TEST_BASE_PATH}
     COMMAND initdb -f ${TEST_BASE_PATH}
-    COMMAND env AWS_REGION=${AWS_REGION} AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} ${CMAKE_CTEST_COMMAND} --verbose --label-regex sanity
-    DEPENDS ${SANITY_TESTS})
+    COMMAND env AWS_REGION=${AWS_REGION}
+                AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                ${CMAKE_CTEST_COMMAND} --verbose --label-regex sanity
+    DEPENDS ${SANITY_TESTS}
+    USES_TERMINAL)
 
 add_custom_target(all_tests
     COMMAND mkdir -p ${TEST_BASE_PATH}
     COMMAND initdb -f ${TEST_BASE_PATH}
-    COMMAND env AWS_REGION=${AWS_REGION} AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} ${CMAKE_CTEST_COMMAND} --verbose
-    DEPENDS ${SANITY_TESTS} ProfileTest UtilTest RunQueryLoop StringDictionaryTest StoragePerfTest)
+    COMMAND env AWS_REGION=${AWS_REGION}
+                AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                ${CMAKE_CTEST_COMMAND} --verbose
+    DEPENDS ${SANITY_TESTS} ProfileTest UtilTest RunQueryLoop StringDictionaryTest StoragePerfTest
+    USES_TERMINAL)
 
 add_custom_target(storage_perf_tests
     COMMAND mkdir -p ${TEST_BASE_PATH}

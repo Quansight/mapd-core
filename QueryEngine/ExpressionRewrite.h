@@ -17,9 +17,11 @@
 #ifndef QUERYENGINE_EXPRESSIONREWRITE_H
 #define QUERYENGINE_EXPRESSIONREWRITE_H
 
-#include <memory>
 #include <list>
+#include <memory>
 #include <vector>
+
+#include "Analyzer/Analyzer.h"
 
 namespace Analyzer {
 
@@ -32,7 +34,9 @@ class InValues;
 class InputColDescriptor;
 
 // Rewrites an OR tree where leaves are equality compare against literals.
-std::shared_ptr<Analyzer::Expr> rewrite_expr(const Analyzer::Expr*);
+Analyzer::ExpressionPtr rewrite_expr(const Analyzer::Expr*);
+// Rewrites array elements that are strings to be dict encoded transient literals
+Analyzer::ExpressionPtr rewrite_array_elements(const Analyzer::Expr*);
 
 std::list<std::shared_ptr<Analyzer::Expr>> redirect_exprs(
     const std::list<std::shared_ptr<Analyzer::Expr>>& exprs,
@@ -42,8 +46,9 @@ std::vector<std::shared_ptr<Analyzer::Expr>> redirect_exprs(
     const std::vector<Analyzer::Expr*>& exprs,
     const std::list<std::shared_ptr<const InputColDescriptor>>& col_descs);
 
-std::shared_ptr<Analyzer::Expr> redirect_expr(const Analyzer::Expr* expr,
-                                              const std::list<std::shared_ptr<const InputColDescriptor>>& col_descs);
+std::shared_ptr<Analyzer::Expr> redirect_expr(
+    const Analyzer::Expr* expr,
+    const std::list<std::shared_ptr<const InputColDescriptor>>& col_descs);
 
 std::shared_ptr<Analyzer::Expr> fold_expr(const Analyzer::Expr*);
 

@@ -84,13 +84,18 @@ class ScalarExprVisitor {
     if (extract) {
       return visitExtractExpr(extract);
     }
-    const auto func_with_custom_type_handling = dynamic_cast<const Analyzer::FunctionOperWithCustomTypeHandling*>(expr);
+    const auto func_with_custom_type_handling =
+        dynamic_cast<const Analyzer::FunctionOperWithCustomTypeHandling*>(expr);
     if (func_with_custom_type_handling) {
       return visitFunctionOperWithCustomTypeHandling(func_with_custom_type_handling);
     }
     const auto func = dynamic_cast<const Analyzer::FunctionOper*>(expr);
     if (func) {
       return visitFunctionOper(func);
+    }
+    const auto array = dynamic_cast<const Analyzer::ArrayExpr*>(expr);
+    if (array) {
+      return visitArrayOper(array);
     }
     const auto datediff = dynamic_cast<const Analyzer::DatediffExpr*>(expr);
     if (datediff) {
@@ -120,7 +125,9 @@ class ScalarExprVisitor {
 
   virtual T visitColumnVar(const Analyzer::ColumnVar*) const { return defaultResult(); }
 
-  virtual T visitColumnVarTuple(const Analyzer::ExpressionTuple*) const { return defaultResult(); }
+  virtual T visitColumnVarTuple(const Analyzer::ExpressionTuple*) const {
+    return defaultResult();
+  }
 
   virtual T visitIterator(const Analyzer::IterExpr*) const { return defaultResult(); }
 
@@ -206,6 +213,14 @@ class ScalarExprVisitor {
     return visitFunctionOper(func_oper);
   }
 
+  virtual T visitArrayOper(Analyzer::ArrayExpr const* array_expr) const {
+    T result = defaultResult();
+    for (size_t i = 0; i < array_expr->getElementCount(); ++i) {
+      result = aggregateResult(result, visit(array_expr->getElement(i)));
+    }
+    return result;
+  }
+
   virtual T visitFunctionOper(const Analyzer::FunctionOper* func_oper) const {
     T result = defaultResult();
     for (size_t i = 0; i < func_oper->getArity(); ++i) {
@@ -228,9 +243,13 @@ class ScalarExprVisitor {
     return result;
   }
 
-  virtual T visitLikelihood(const Analyzer::LikelihoodExpr* likelihood) const { return visit(likelihood->get_arg()); }
+  virtual T visitLikelihood(const Analyzer::LikelihoodExpr* likelihood) const {
+    return visit(likelihood->get_arg());
+  }
 
-  virtual T visitOffsetInFragment(const Analyzer::OffsetInFragment*) const { return defaultResult(); }
+  virtual T visitOffsetInFragment(const Analyzer::OffsetInFragment*) const {
+    return defaultResult();
+  }
 
   virtual T visitAggExpr(const Analyzer::AggExpr* agg) const {
     T result = defaultResult();
@@ -238,7 +257,9 @@ class ScalarExprVisitor {
   }
 
  protected:
-  virtual T aggregateResult(const T& aggregate, const T& next_result) const { return next_result; }
+  virtual T aggregateResult(const T& aggregate, const T& next_result) const {
+    return next_result;
+  }
 
   virtual T defaultResult() const { return T{}; }
 };

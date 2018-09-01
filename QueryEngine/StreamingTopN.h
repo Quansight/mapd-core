@@ -25,6 +25,8 @@
 #ifndef QUERYENGINE_STREAMINGTOPN_H
 #define QUERYENGINE_STREAMINGTOPN_H
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace streaming_top_n {
@@ -41,21 +43,23 @@ std::vector<int8_t> get_rows_copy_from_heaps(const int64_t* heaps,
 }  // namespace streaming_top_n
 
 struct RelAlgExecutionUnit;
-struct QueryMemoryDescriptor;
-bool use_streaming_top_n(const RelAlgExecutionUnit& ra_exe_unit, const QueryMemoryDescriptor& query_mem_desc);
+class QueryMemoryDescriptor;
+bool use_streaming_top_n(const RelAlgExecutionUnit& ra_exe_unit,
+                         const QueryMemoryDescriptor& query_mem_desc);
 
 #ifdef HAVE_CUDA
 namespace Data_Namespace {
 
 class DataMgr;
 
-}  // Data_Namespace
+}  // namespace Data_Namespace
 
-std::vector<int8_t> pick_top_n_rows_from_dev_heaps(Data_Namespace::DataMgr* data_mgr,
-                                                   const int64_t* dev_heaps,
-                                                   const RelAlgExecutionUnit& ra_exe_unit,
-                                                   const QueryMemoryDescriptor& query_mem_desc,
-                                                   const size_t thread_count,
-                                                   const int device_id);
+std::vector<int8_t> pick_top_n_rows_from_dev_heaps(
+    Data_Namespace::DataMgr* data_mgr,
+    const int64_t* dev_heaps,
+    const RelAlgExecutionUnit& ra_exe_unit,
+    const QueryMemoryDescriptor& query_mem_desc,
+    const size_t thread_count,
+    const int device_id);
 #endif  // HAVE_CUDA
 #endif  // QUERYENGINE_STREAMINGTOPN_H

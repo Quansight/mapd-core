@@ -24,7 +24,14 @@ using CalciteDeletePathSelector = PreprocessorTrue;
 using CalciteDeletePathSelector = PreprocessorFalse;
 #endif
 
-// There is probably a better place to put this.  Catalog.h, perhaps?  Reviewers, please comment.
+#ifdef HAVE_CUDA
+using CudaBuildSelector = PreprocessorTrue;
+#else
+using CudaBuildSelector = PreprocessorFalse;
+#endif
+
+// There is probably a better place to put this.  Catalog.h, perhaps?  Reviewers, please
+// comment.
 inline constexpr char const* getDeletedColumnLabel() {
   return "$delete$";
 }

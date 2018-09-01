@@ -21,8 +21,12 @@ import com.mapd.thrift.calciteserver.InvalidParseRequest;
 import com.mapd.thrift.calciteserver.TAccessedQueryObjects;
 import com.mapd.thrift.calciteserver.TCompletionHint;
 import com.mapd.thrift.calciteserver.TCompletionHintType;
+import com.mapd.thrift.calciteserver.TFilterPushDownInfo;
 import com.mapd.thrift.calciteserver.TPlanResult;
 import com.mapd.thrift.calciteserver.CalciteServer;
+
+import static com.mapd.calcite.parser.MapDParser.CURRENT_PARSER;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -82,7 +86,8 @@ class CalciteServerHandler implements CalciteServer.Iface {
   }
 
   @Override
-  public TPlanResult process(String user, String session, String catalog, String sqlText, boolean legacySyntax, boolean isExplain) throws InvalidParseRequest, TException {
+  public TPlanResult process(String user, String session, String catalog, String sqlText,
+      java.util.List<TFilterPushDownInfo> thriftFilterPushDownInfo, boolean legacySyntax, boolean isExplain) throws InvalidParseRequest, TException {
     long timer = System.currentTimeMillis();
     callCount++;
     MapDParser parser;
@@ -96,6 +101,7 @@ class CalciteServerHandler implements CalciteServer.Iface {
     MapDUser mapDUser = new MapDUser(user, session, catalog, mapdPort);
     MAPDLOGGER.debug("process was called User: " + user + " Catalog: " + catalog + " sql: " + sqlText);
     parser.setUser(mapDUser);
+    CURRENT_PARSER.set(parser);
 
     // need to trim the sql string as it seems it is not trimed prior to here
     sqlText = sqlText.trim();
@@ -109,7 +115,11 @@ class CalciteServerHandler implements CalciteServer.Iface {
     TAccessedQueryObjects resolvedAccessedObjects = new TAccessedQueryObjects();
 
     try {
-      relAlgebra = parser.getRelAlgebra(sqlText, legacySyntax, mapDUser, isExplain);
+      final List<MapDParser.FilterPushDownInfo> filterPushDownInfo = new ArrayList<>();
+      for (final TFilterPushDownInfo req : thriftFilterPushDownInfo) {
+        filterPushDownInfo.add(new MapDParser.FilterPushDownInfo(req.input_prev, req.input_start, req.input_next));
+      }
+      relAlgebra = parser.getRelAlgebra(sqlText, filterPushDownInfo, legacySyntax, mapDUser, isExplain);
       capturer = parser.captureIdentifiers(sqlText, legacySyntax);
       
       primaryAccessedObjects.tables_selected_from = new ArrayList<>(capturer.selects);
@@ -138,6 +148,7 @@ class CalciteServerHandler implements CalciteServer.Iface {
       MAPDLOGGER.error(msg);
       throw new InvalidParseRequest(-4, msg);
     } finally {
+      CURRENT_PARSER.set(null);
       try {
         // put parser object back in pool for others to use
         parserPool.returnObject(parser);
@@ -186,9 +197,11 @@ class CalciteServerHandler implements CalciteServer.Iface {
       MAPDLOGGER.error(msg);
       return;
     }
+    CURRENT_PARSER.set(parser);
     try {
       parser.updateMetaData(catalog, table);
     } finally {
+      CURRENT_PARSER.set(null);
       try {
         // put parser object back in pool for others to use
         MAPDLOGGER.debug("Returning object to pool");
@@ -215,6 +228,7 @@ class CalciteServerHandler implements CalciteServer.Iface {
     MapDUser mapDUser = new MapDUser(user, session, catalog, mapdPort);
     MAPDLOGGER.debug("getCompletionHints was called User: " + user + " Catalog: " + catalog + " sql: " + sql);
     parser.setUser(mapDUser);
+    CURRENT_PARSER.set(parser);
 
     MapDPlanner.CompletionResult completion_result;
     try {
@@ -224,6 +238,7 @@ class CalciteServerHandler implements CalciteServer.Iface {
       MAPDLOGGER.error(msg);
       return new ArrayList<>();
     } finally {
+      CURRENT_PARSER.set(null);
       try {
         // put parser object back in pool for others to use
         parserPool.returnObject(parser);

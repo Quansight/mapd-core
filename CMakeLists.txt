@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 2.8)
 
+if("${CMAKE_VERSION}" VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
+endif()
+
 find_program(CCACHE_EXE ccache)
 if(CCACHE_EXE)
   set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_EXE}")
@@ -25,8 +29,8 @@ set_property(CACHE MAPD_EDITION PROPERTY STRINGS "EE" "CE" "OS")
 add_definitions("-DMAPD_EDITION_${MAPD_EDITION}")
 string(TOLOWER "${MAPD_EDITION}" MAPD_EDITION_LOWER)
 
-set(MAPD_VERSION_MAJOR "3")
-set(MAPD_VERSION_MINOR "9")
+set(MAPD_VERSION_MAJOR "4")
+set(MAPD_VERSION_MINOR "2")
 set(MAPD_VERSION_PATCH "0")
 set(MAPD_VERSION_EXTRA "dev")
 set(MAPD_VERSION_RAW "${MAPD_VERSION_MAJOR}.${MAPD_VERSION_MINOR}.${MAPD_VERSION_PATCH}${MAPD_VERSION_EXTRA}")
@@ -40,6 +44,10 @@ else()
   set(MAPD_BUILD_NUMBER "dev")
 endif()
 set(MAPD_VERSION "${MAPD_VERSION_RAW}-${MAPD_BUILD_NUMBER}")
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -88,6 +96,11 @@ else()
   set(MAPD_PACKAGE_FLAGS "${MAPD_PACKAGE_FLAGS}-cpu")
 endif()
 
+option(ENABLE_JIT_DEBUG "Enable debugging symbols for the JIT" OFF)
+if (ENABLE_JIT_DEBUG)
+  add_definitions("-DWITH_JIT_DEBUG")
+endif()
+
 if(XCODE)
   if(ENABLE_CUDA)
     set(CMAKE_EXE_LINKER_FLAGS "-F/Library/Frameworks -framework CUDA")
@@ -129,10 +142,9 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux" AND (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"
     AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 3.6 OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 3.6))
     OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)))
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1y -DHAS_SHARED_MUTEX")
+  add_definitions("-DHAS_SHARED_MUTEX")
   find_package( Boost COMPONENTS filesystem program_options regex system REQUIRED QUIET )
 else()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
   find_package( Boost COMPONENTS filesystem program_options regex thread system REQUIRED QUIET )
   if(PREFER_STATIC_LIBS AND ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     list(APPEND Boost_LIBRARIES rt)
@@ -233,6 +245,14 @@ add_subdirectory(ThirdParty/googletest)
 # Arrow
 find_package(Arrow REQUIRED)
 add_definitions("-DARROW_NO_DEPRECATED_API")
+if(HAVE_ARROW_STATIC_RECORDBATCH_CTOR)
+  add_definitions("-DHAVE_ARROW_STATIC_RECORDBATCH_CTOR")
+endif()
+if(HAVE_ARROW_APPENDVALUES)
+  add_definitions("-DHAVE_ARROW_APPENDVALUES")
+else()
+  message(WARNING "It appears that you have Arrow < 0.10.0. Please upgrade.")
+endif()
 include_directories(${Arrow_INCLUDE_DIRS})
 
 # RapidJSON
@@ -324,10 +344,6 @@ endif()
 option(ENABLE_JOIN_EXEC "Enable RA vm to execute join node" ON)
 if(ENABLE_JOIN_EXEC)
   add_definitions("-DENABLE_JOIN_EXEC")
-  option(ENABLE_EQUIJOIN_FOLD "Enable multiple equi-join to be folded" ON)
-  if(ENABLE_EQUIJOIN_FOLD)
-    add_definitions("-DENABLE_EQUIJOIN_FOLD")
-  endif()
 endif()
 option(ENABLE_MULTIFRAG_JOIN "Enable Join on Multi-frag table" ON)
 if(ENABLE_MULTIFRAG_JOIN)
@@ -360,9 +376,13 @@ endif()
 
 add_subdirectory(SqliteConnector)
 
+add_subdirectory(StringDictionary)
+add_subdirectory(Calcite)
+get_target_property(CalciteThrift_BINARY_DIR calciteserver_thrift BINARY_DIR)
+include_directories(${CalciteThrift_BINARY_DIR})
+
 add_subdirectory(Distributed)
 
-add_subdirectory(StringDictionary)
 add_subdirectory(Catalog)
 add_subdirectory(Parser)
 add_subdirectory(Analyzer)
@@ -383,8 +403,6 @@ option(ENABLE_ODBC "Build ODBC driver" OFF)
 if(ENABLE_ODBC)
   add_subdirectory(ODBC)
 endif()
-
-add_subdirectory(Calcite)
 
 set(MAPD_LIBRARIES Shared Catalog SqliteConnector Parser Analyzer Planner CsvImport QueryRunner QueryEngine DataMgr Fragmenter Chunk)
 
@@ -443,7 +461,7 @@ add_custom_command(
 list(APPEND ADDITIONAL_MAKE_CLEAN_FILES ${CMAKE_SOURCE_DIR}/java/thrift/src/gen/)
 
 execute_process(
-  COMMAND ${GIT_EXECUTABLE} log -1 --format=%h
+  COMMAND ${GIT_EXECUTABLE} rev-parse --short=10 HEAD
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   OUTPUT_VARIABLE MAPD_GIT_HASH
   OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -468,7 +486,7 @@ add_dependencies(mapd_server rerun_cmake)
 
 target_link_libraries(mapd_server mapd_thrift thrift_handler ${MAPD_LIBRARIES} ${Boost_LIBRARIES} ${Glog_LIBRARIES} ${CMAKE_DL_LIBS} ${CUDA_LIBRARIES} ${LLVM_LINKER_FLAGS} ${PROFILER_LIBS} ${CURSES_LIBRARIES} ${ZLIB_LIBRARIES})
 
-target_link_libraries(initdb ${MAPD_LIBRARIES} ${Boost_LIBRARIES} ${Glog_LIBRARIES} ${CMAKE_DL_LIBS} ${CUDA_LIBRARIES} ${LLVM_LINKER_FLAGS} ${CURSES_LIBRARIES} ${ZLIB_LIBRARIES})
+target_link_libraries(initdb mapd_thrift DataMgr ${MAPD_LIBRARIES} ${Boost_LIBRARIES} ${Glog_LIBRARIES} ${CMAKE_DL_LIBS} ${CUDA_LIBRARIES} ${LLVM_LINKER_FLAGS} ${CURSES_LIBRARIES} ${ZLIB_LIBRARIES})
 
 macro(set_dpkg_arch arch_in arch_out)
   if("${arch_in}" STREQUAL "x86_64")
@@ -482,6 +500,26 @@ macro(set_dpkg_arch arch_in arch_out)
   endif()
 endmacro()
 
+# doxygen
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+  configure_file(
+    ${CMAKE_SOURCE_DIR}/Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile @ONLY)
+  add_custom_target(doxygen ${DOXYGEN_EXECUTABLE} ${CMAKE_BINARY_DIR}/Doxyfile
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Generate API documentation with Doxygen"
+    VERBATIM
+    USES_TERMINAL
+  )
+  add_custom_target(doxygen_zip zip -r doxygen-${MAPD_GIT_HASH}.zip doxygen
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Generating .zip with API documentation from Doxygen"
+    VERBATIM
+    USES_TERMINAL
+  )
+  add_dependencies(doxygen_zip doxygen)
+endif(DOXYGEN_FOUND)
+
 # Packaging
 set(CPACK_PACKAGE_VENDOR "MapD Technologies, Inc.")
 set(CPACK_PACKAGE_CONTACT "support@mapd.com")
@@ -491,6 +529,7 @@ set(CPACK_STRIP_FILES ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "default-jre-headless | openjdk-8-jre-headless | java8-runtime-headless, bsdmainutils, curl | wget")
 set(CPACK_RPM_PACKAGE_REQUIRES "java-headless, util-linux, curl")
 set(CPACK_RPM_PACKAGE_AUTOREQ OFF)
+set(CPACK_RPM_SPEC_MORE_DEFINE "%define __jar_repack %{nil}")
 if("${MAPD_EDITION_LOWER}" STREQUAL "ee")
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}, libldap-2.4-2")
 endif()
@@ -591,16 +630,23 @@ if(NOT MVN_EXECUTABLE)
 endif()
 file(GLOB_RECURSE JAVA_POM RELATIVE ${CMAKE_SOURCE_DIR} java/**/pom.xml)
 file(GLOB_RECURSE JAVA_SOURCES RELATIVE ${CMAKE_SOURCE_DIR} java/**/*.java)
+
+set(MAPD_JAR_RELEASE_VERSION "${MAPD_VERSION_MAJOR}.${MAPD_VERSION_MINOR}.${MAPD_VERSION_PATCH}")
+if("${MAPD_VERSION_EXTRA}" STREQUAL "dev")
+  set (MAPD_JAR_RELEASE_VERSION "${MAPD_JAR_RELEASE_VERSION}-SNAPSHOT")
+endif()
+set (MAPD_JDBC_JAR "mapdjdbc-${MAPD_JAR_RELEASE_VERSION}.jar")
+
 add_custom_command(
   OUTPUT
     ${CMAKE_BINARY_DIR}/bin/mapd-1.0-SNAPSHOT-jar-with-dependencies.jar
-    ${CMAKE_BINARY_DIR}/bin/mapdjdbc-1.0-SNAPSHOT-jar-with-dependencies.jar
+    ${CMAKE_BINARY_DIR}/bin/${MAPD_JDBC_JAR}
     ${CMAKE_BINARY_DIR}/bin/calcite-1.0-SNAPSHOT-jar-with-dependencies.jar
-  COMMAND MVNPATH=${CMAKE_SOURCE_DIR}/java ${MVN_EXECUTABLE} -q clean install -Dthrift.version="${Thrift_VERSION}"
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/java/mapd/target/mapd-1.0-SNAPSHOT-jar-with-dependencies.jar ${CMAKE_BINARY_DIR}/bin
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/java/mapdjdbc/target/mapdjdbc-1.0-SNAPSHOT-jar-with-dependencies.jar ${CMAKE_BINARY_DIR}/bin
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/java/calcite/target/calcite-1.0-SNAPSHOT-jar-with-dependencies.jar ${CMAKE_BINARY_DIR}/bin
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/java
+    COMMAND MVNPATH=${CMAKE_SOURCE_DIR}/java ${MVN_EXECUTABLE} -q clean install -Dthrift.version="${Thrift_VERSION}" -Dmapd.release.version="${MAPD_JAR_RELEASE_VERSION}"
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/java/mapd/target/mapd-1.0-SNAPSHOT-jar-with-dependencies.jar ${CMAKE_BINARY_DIR}/bin
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/java/mapdjdbc/target/${MAPD_JDBC_JAR} ${CMAKE_BINARY_DIR}/bin
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/java/calcite/target/calcite-1.0-SNAPSHOT-jar-with-dependencies.jar ${CMAKE_BINARY_DIR}/bin
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/java
   DEPENDS
     ${CMAKE_SOURCE_DIR}/java/thrift/src/gen/com/mapd/thrift/server/MapD.java
     ${CMAKE_SOURCE_DIR}/java/thrift/src/gen/com/mapd/thrift/calciteserver/CalciteServer.java
@@ -611,15 +657,15 @@ add_custom_command(
   )
 add_custom_target(mapd_java_components ALL DEPENDS
   ${CMAKE_BINARY_DIR}/bin/mapd-1.0-SNAPSHOT-jar-with-dependencies.jar
-  ${CMAKE_BINARY_DIR}/bin/mapdjdbc-1.0-SNAPSHOT-jar-with-dependencies.jar
+  ${CMAKE_BINARY_DIR}/bin/${MAPD_JDBC_JAR}
   ${CMAKE_BINARY_DIR}/bin/calcite-1.0-SNAPSHOT-jar-with-dependencies.jar)
 add_custom_target(mapd_java_clean
-  COMMAND MVNPATH=${CMAKE_SOURCE_DIR}/java ${MVN_EXECUTABLE} -q clean
+  COMMAND MVNPATH=${CMAKE_SOURCE_DIR}/java ${MVN_EXECUTABLE} -q clean -Dmapd.release.version="${MAPD_JAR_RELEASE_VERSION}"
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/java
   )
 add_dependencies(clean-all mapd_java_clean)
 install(FILES ${CMAKE_SOURCE_DIR}/java/mapd/target/mapd-1.0-SNAPSHOT-jar-with-dependencies.jar DESTINATION bin)
-install(FILES ${CMAKE_SOURCE_DIR}/java/mapdjdbc/target/mapdjdbc-1.0-SNAPSHOT-jar-with-dependencies.jar DESTINATION bin)
+install(FILES ${CMAKE_SOURCE_DIR}/java/mapdjdbc/target/${MAPD_JDBC_JAR} DESTINATION bin)
 install(FILES ${CMAKE_SOURCE_DIR}/java/calcite/target/calcite-1.0-SNAPSHOT-jar-with-dependencies.jar DESTINATION bin)
 
 set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${ADDITIONAL_MAKE_CLEAN_FILES}")
@@ -652,7 +698,10 @@ install(FILES "${EULA_FILE}" DESTINATION ".")
 install(PROGRAMS startmapd DESTINATION ".")
 install(PROGRAMS insert_sample_data DESTINATION ".")
 
-install(DIRECTORY docker/ DESTINATION "docker")
+if("${MAPD_EDITION_LOWER}" STREQUAL "ee")
+  install(DIRECTORY docker/sds DESTINATION "docker")
+endif()
+install(FILES docker/Dockerfile docker/README.md DESTINATION "docker")
 
 exec_program(uname ARGS -m OUTPUT_VARIABLE MAPD_HOST_SYSTEM_ARCHITECTURE) # does not account for cross-compiling or Windows
 set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${MAPD_EDITION_LOWER}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${MAPD_HOST_SYSTEM_ARCHITECTURE}${MAPD_PACKAGE_FLAGS}")

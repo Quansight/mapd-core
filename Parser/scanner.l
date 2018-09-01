@@ -24,6 +24,7 @@ using namespace std;
 
 ALL		{ yylval.qualval = kALL; TOK(ALL) }
 ALTER         TOK(ALTER)
+ADD           TOK(ADD)
 AND           TOK(AND)
 ANY           { yylval.qualval = kANY; TOK(ANY) }
 ARRAY         TOK(ARRAY)
@@ -159,6 +160,9 @@ WORK          TOK(WORK)
 	/* names */
 [A-Za-z_][A-Za-z0-9\$_]*	{ yylval.stringval = new std::string(yytext); TOK(NAME) }
 
+	/* emails */
+([^[:space:]\"]+|\".+\")@[A-Za-z0-9][A-Za-z0-9\-\.]*\.[A-Za-z]+	{ yylval.stringval = new std::string(yytext); TOK(EMAIL) }
+
 	/* parameters */
 ":"[A-Za-z][A-Za-z0-9_]*	TOK(PARAMETER)
 
@@ -247,7 +251,7 @@ WORK          TOK(WORK)
 \n		{ lineno++; }
 	*/
 
-[ \t\r]+	;	/* white space */
+[ \n\t\r]+	;	/* white space */
 
 "--".*	;	/* comment */
 

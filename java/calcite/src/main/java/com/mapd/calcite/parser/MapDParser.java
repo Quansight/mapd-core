@@ -15,8 +15,6 @@
  */
 package com.mapd.calcite.parser;
 
-import com.mapd.parser.server.ExtensionFunction;
-
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -24,19 +22,20 @@ import java.util.Set;
 
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.prepare.MapDPlanner;
+import org.apache.calcite.prepare.SqlIdentifierCapturer;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.schema.SchemaPlus;
-import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.SqlAsOperator;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlLiteral;
-import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlNumericLiteral;
 import org.apache.calcite.sql.SqlOperatorTable;
 import org.apache.calcite.sql.SqlOrderBy;
@@ -45,8 +44,6 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
-import org.apache.calcite.prepare.MapDPlanner;
-import org.apache.calcite.prepare.SqlIdentifierCapturer;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.tools.FrameworkConfig;
@@ -58,12 +55,16 @@ import org.apache.calcite.util.ConversionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.mapd.parser.server.ExtensionFunction;
+
 /**
  *
  * @author michael
  */
 public final class MapDParser {
 
+  public static final ThreadLocal<MapDParser> CURRENT_PARSER = new ThreadLocal<>();
+  
   final static Logger MAPDLOGGER = LoggerFactory.getLogger(MapDParser.class);
 
 //    private SqlTypeFactoryImpl typeFactory;
@@ -86,7 +87,7 @@ public final class MapDParser {
     this.mapdPort = mapdPort;
   }
 
-  private Planner getPlanner() {
+  private MapDPlanner getPlanner() {
     MapDSchema mapd = new MapDSchema(dataDir, this, mapdPort, mapdUser);
     final SchemaPlus rootSchema = Frameworks.createRootSchema(true);
     final FrameworkConfig config = Frameworks.newConfigBuilder()
@@ -104,10 +105,23 @@ public final class MapDParser {
     this.mapdUser = mapdUser;
   }
 
-  public String getRelAlgebra(String sql, final boolean legacy_syntax, final MapDUser mapDUser, final boolean isExplain)
+  public static class FilterPushDownInfo {
+    public FilterPushDownInfo(final int input_prev, final int input_start, final int input_next)  {
+      this.input_prev = input_prev;
+      this.input_start = input_start;
+      this.input_next = input_next;
+    }
+
+    public int input_prev;
+    public int input_start;
+    public int input_next;
+  }
+
+  public String getRelAlgebra(String sql, final List<FilterPushDownInfo> filterPushDownInfo,
+          final boolean legacy_syntax, final MapDUser mapDUser, final boolean isExplain)
           throws SqlParseException, ValidationException, RelConversionException {
     callCount++;
-    final RelRoot sqlRel = queryToSqlNode(sql, legacy_syntax);
+    final RelRoot sqlRel = queryToSqlNode(sql, filterPushDownInfo, legacy_syntax);
 
     RelNode project = sqlRel.project();
 
@@ -121,7 +135,7 @@ public final class MapDParser {
   }
 
   public MapDPlanner.CompletionResult getCompletionHints(String sql, int cursor, List<String> visible_tables) {
-    return ((MapDPlanner) getPlanner()).getCompletionHints(sql, cursor, visible_tables);
+    return getPlanner().getCompletionHints(sql, cursor, visible_tables);
   }
   
   public Set<String> resolveSelectIdentifiers(SqlIdentifierCapturer capturer) {
@@ -158,8 +172,9 @@ public final class MapDParser {
     }
   }
 
-  RelRoot queryToSqlNode(final String sql, final boolean legacy_syntax) throws SqlParseException, ValidationException, RelConversionException {
-    Planner planner = getPlanner();
+  RelRoot queryToSqlNode(final String sql, final List<FilterPushDownInfo> filterPushDownInfo, final boolean legacy_syntax)
+          throws SqlParseException, ValidationException, RelConversionException {
+    MapDPlanner planner = getPlanner();
 
     SqlNode node = processSQL(sql, legacy_syntax, planner);
     if (legacy_syntax) {
@@ -200,6 +215,7 @@ public final class MapDParser {
       validateR = planner.validate(validateR);
     }
 
+    planner.setFilterPushDownInfo(filterPushDownInfo);
     RelRoot relR = planner.rel(validateR);
     planner.close();
     return relR;

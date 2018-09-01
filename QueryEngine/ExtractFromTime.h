@@ -21,6 +21,9 @@
 #include <time.h>
 #include "../Shared/funcannotations.h"
 
+#define NANOSECSPERSEC 1000000000L
+#define MICROSECSPERSEC 1000000L
+#define MILLISECSPERSEC 1000L
 #define SECSPERMIN 60L
 #define MINSPERHOUR 60L
 #define HOURSPERDAY 24L
@@ -69,6 +72,9 @@ enum ExtractField {
   kHOUR,
   kMINUTE,
   kSECOND,
+  kMILLISECOND,
+  kMICROSECOND,
+  kNANOSECOND,
   kDOW,
   kISODOW,
   kDOY,
@@ -96,5 +102,12 @@ __device__
 #endif
     int64_t
     ExtractFromTime(ExtractField field, time_t timeval);
+
+extern "C" __attribute__((noinline))
+#ifdef __CUDACC__
+__device__
+#endif
+    int64_t
+    ExtractFromTimeHighPrecision(ExtractField field, time_t timeval, const int32_t dimen);
 
 #endif  // QUERYENGINE_EXTRACTFROMTIME_H

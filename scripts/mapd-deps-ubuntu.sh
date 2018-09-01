@@ -65,12 +65,10 @@ sudo apt install -y \
 # install AWS core and s3 sdk
 install_awscpp -j $(nproc)
 
-VERS=0.10.0
+VERS=0.11.0
 wget --continue http://apache.claz.org/thrift/$VERS/thrift-$VERS.tar.gz
 tar xvf thrift-$VERS.tar.gz
 pushd thrift-$VERS
-patch -p1 < $SCRIPTS_DIR/thrift-3821-tmemorybuffer-overflow-check.patch
-patch -p1 < $SCRIPTS_DIR/thrift-3821-tmemorybuffer-overflow-test.patch
 JAVA_PREFIX=$PREFIX/lib ./configure \
     --with-lua=no \
     --with-python=no \
@@ -83,7 +81,7 @@ make -j $(nproc)
 make install
 popd
 
-VERS=1.11.3
+VERS=1.14.3
 wget --continue https://github.com/Blosc/c-blosc/archive/v$VERS.tar.gz
 tar xvf v$VERS.tar.gz
 BDIR="c-blosc-$VERS/build"
@@ -103,7 +101,7 @@ make -j $(nproc)
 make install
 popd
 
-VERS=2017.10.16.00
+VERS=2018.05.07.00
 wget --continue https://github.com/facebook/folly/archive/v$VERS.tar.gz
 tar xvf v$VERS.tar.gz
 pushd folly-$VERS/folly

@@ -57,17 +57,13 @@ void RenderInfo::disableCudaBuffers() {
   CHECK(false);
 }
 
-bool RenderInfo::hasVega() const {
-  CHECK(false);
-  return false;
-}
-
 std::shared_ptr<QueryRenderer::QueryDataLayout> RenderInfo::getQueryVboLayout() const {
   CHECK(false);
   return nullptr;
 }
 
-void RenderInfo::setQueryVboLayout(const std::shared_ptr<QueryRenderer::QueryDataLayout>& vbo_layout) {
+void RenderInfo::setQueryVboLayout(
+    const std::shared_ptr<QueryRenderer::QueryDataLayout>& vbo_layout) {
   CHECK(false);
 }
 
@@ -76,7 +72,8 @@ std::shared_ptr<QueryRenderer::QueryDataLayout> RenderInfo::getQuerySsboLayout()
   return nullptr;
 }
 
-void RenderInfo::setQuerySsboLayout(const std::shared_ptr<QueryRenderer::QueryDataLayout>& ssbo_layout) {
+void RenderInfo::setQuerySsboLayout(
+    const std::shared_ptr<QueryRenderer::QueryDataLayout>& ssbo_layout) {
   CHECK(false);
 }
 
@@ -85,6 +82,6 @@ bool RenderInfo::setInSituDataIfUnset(const bool is_in_situ_data) {
   return false;
 }
 
-void RenderInfo::reset() {
+void RenderInfo::reset(const bool disallow_in_situ_only_if_final_ED_is_aggregate_in) {
   CHECK(false);
 }

@@ -175,6 +175,10 @@ double Round(const double x, const int32_t y) {
   }
 
   double exp = pow(10, y);
+#if defined(__powerpc__) && !defined(__CUDACC__)
+  int32_t yy = y - 1;
+  exp = 10 * powf((float)10L, yy);
+#endif
   return (round(x * exp) / exp) + 0.0;
 }
 
@@ -185,6 +189,10 @@ float Round__(const float x, const int32_t y) {
   }
 
   float exp = powf((float)10L, y);
+#if defined(__powerpc__) && !defined(__CUDACC__)
+  int32_t yy = y - 1;
+  exp = 10 * powf((float)10L, yy);
+#endif
   return roundf(x * exp) / exp + 0.0f;
 }
 
@@ -198,6 +206,12 @@ int16_t Round__1(const int16_t x, const int32_t y) {
   int32_t p_half = p >> 1;
 
   int64_t temp = x;
+#if defined(__powerpc__) && !defined(__CUDACC__)
+  int16_t xx = x;
+  xx += 1;
+  temp = xx;
+  temp -= 1;
+#endif
   temp = temp >= 0 ? temp + p_half : temp - p_half;
   temp = temp / p;
   return temp * p;
@@ -213,6 +227,12 @@ int32_t Round__2(const int32_t x, const int32_t y) {
   int32_t p_half = p >> 1;
 
   int64_t temp = x;
+#if defined(__powerpc__) && !defined(__CUDACC__)
+  int32_t xx = x;
+  xx += 1;
+  temp = xx;
+  temp -= 1;
+#endif
   temp = temp >= 0 ? temp + p_half : temp - p_half;
   temp = temp / p;
   return temp * p;
@@ -249,7 +269,6 @@ int64_t Round__4(const int64_t x, const int32_t y0, const int32_t scale) {
   temp = temp / p;
   return temp * p;
 }
-
 
 EXTENSION_NOINLINE
 double Round2_to_digit(const double x, const int32_t y) {
@@ -299,6 +318,13 @@ int16_t Truncate__1(const int16_t x, const int32_t y) {
   }
   int32_t p = pow((float)10L, std::abs(y));
   int64_t temp = x / p;
+#if defined(__powerpc__) && !defined(__CUDACC__)
+  int16_t xx = x;
+  xx += 1;
+  temp = xx;
+  temp -= 1;
+  temp /= p;
+#endif
   return temp * p;
 }
 
@@ -333,50 +359,63 @@ double conv_4326_900913_y(const double y) {
 }
 
 /** @brief  Computes the distance, in meters, between two WGS-84 positions.
-  *
-  * The result is equal to <code>EARTH_RADIUS_IN_METERS*ArcInRadians(from,to)</code>
-  *
-  * ArcInRadians is equal to <code>Distance(from,to)/EARTH_RADIUS_IN_METERS</code>
-  *    <code>= 2*asin(sqrt(h(d/EARTH_RADIUS_IN_METERS )))</code>
-  *
-  * where:<ul>
-  *    <li>d is the distance in meters between 'from' and 'to' positions.</li>
-  *    <li>h is the haversine function: <code>h(x)=sin²(x/2)</code></li>
-  * </ul>
-  *
-  * code attribution: http://blog.julien.cayzac.name/2008/10/arc-and-distance-between-two-points-on.html
-  *
-  * The haversine formula gives:
-  *    <code>h(d/R) = h(from.lat-to.lat)+h(from.lon-to.lon)+cos(from.lat)*cos(to.lat)</code>
-  *
-  * @sa http://en.wikipedia.org/wiki/Law_of_haversines
-  */
+ *
+ * The result is equal to <code>EARTH_RADIUS_IN_METERS*ArcInRadians(from,to)</code>
+ *
+ * ArcInRadians is equal to <code>Distance(from,to)/EARTH_RADIUS_IN_METERS</code>
+ *    <code>= 2*asin(sqrt(h(d/EARTH_RADIUS_IN_METERS )))</code>
+ *
+ * where:<ul>
+ *    <li>d is the distance in meters between 'from' and 'to' positions.</li>
+ *    <li>h is the haversine function: <code>h(x)=sin²(x/2)</code></li>
+ * </ul>
+ *
+ * code attribution:
+ * http://blog.julien.cayzac.name/2008/10/arc-and-distance-between-two-points-on.html
+ *
+ * The haversine formula gives:
+ *    <code>h(d/R) =
+ * h(from.lat-to.lat)+h(from.lon-to.lon)+cos(from.lat)*cos(to.lat)</code>
+ *
+ * @sa http://en.wikipedia.org/wiki/Law_of_haversines
+ */
 EXTENSION_NOINLINE
-double distance_in_meters(const double fromlon, const double fromlat, const double tolon, const double tolat) {
+double distance_in_meters(const double fromlon,
+                          const double fromlat,
+                          const double tolon,
+                          const double tolat) {
   double latitudeArc = (fromlat - tolat) * 0.017453292519943295769236907684886;
   double longitudeArc = (fromlon - tolon) * 0.017453292519943295769236907684886;
   double latitudeH = sin(latitudeArc * 0.5);
   latitudeH *= latitudeH;
   double lontitudeH = sin(longitudeArc * 0.5);
   lontitudeH *= lontitudeH;
-  double tmp = cos(fromlat * 0.017453292519943295769236907684886) * cos(tolat * 0.017453292519943295769236907684886);
+  double tmp = cos(fromlat * 0.017453292519943295769236907684886) *
+               cos(tolat * 0.017453292519943295769236907684886);
   return 6372797.560856 * (2.0 * asin(sqrt(latitudeH + tmp * lontitudeH)));
 }
 
 EXTENSION_NOINLINE
-double distance_in_meters__(const float fromlon, const float fromlat, const float tolon, const float tolat) {
+double distance_in_meters__(const float fromlon,
+                            const float fromlat,
+                            const float tolon,
+                            const float tolat) {
   float latitudeArc = (fromlat - tolat) * 0.017453292519943295769236907684886;
   float longitudeArc = (fromlon - tolon) * 0.017453292519943295769236907684886;
   float latitudeH = sinf(latitudeArc * 0.5);
   latitudeH *= latitudeH;
   float lontitudeH = sinf(longitudeArc * 0.5);
   lontitudeH *= lontitudeH;
-  float tmp = cosf(fromlat * 0.017453292519943295769236907684886) * cosf(tolat * 0.017453292519943295769236907684886);
+  float tmp = cosf(fromlat * 0.017453292519943295769236907684886) *
+              cosf(tolat * 0.017453292519943295769236907684886);
   return 6372797.560856 * (2.0 * asinf(sqrtf(latitudeH + tmp * lontitudeH)));
 }
 
 EXTENSION_NOINLINE
-double approx_distance_in_meters(const float fromlon, const float fromlat, const float tolon, const float tolat) {
+double approx_distance_in_meters(const float fromlon,
+                                 const float fromlat,
+                                 const float tolon,
+                                 const float tolat) {
 #ifdef __CUDACC__
   float latitudeArc = (fromlat - tolat) * 0.017453292519943295769236907684886;
   float longitudeArc = (fromlon - tolon) * 0.017453292519943295769236907684886;
@@ -384,8 +423,8 @@ double approx_distance_in_meters(const float fromlon, const float fromlat, const
   latitudeH *= latitudeH;
   float lontitudeH = __sinf(longitudeArc * 0.5);
   lontitudeH *= lontitudeH;
-  float tmp =
-      __cosf(fromlat * 0.017453292519943295769236907684886) * __cosf(tolat * 0.017453292519943295769236907684886);
+  float tmp = __cosf(fromlat * 0.017453292519943295769236907684886) *
+              __cosf(tolat * 0.017453292519943295769236907684886);
   return 6372797.560856 * (2.0 * asinf(__fsqrt_rd(latitudeH + tmp * lontitudeH)));
 #else
   return distance_in_meters__(fromlon, fromlat, tolon, tolat);
@@ -400,7 +439,8 @@ float rect_pixel_bin(const float val,
                      const int32_t dimensionsize) {
   /** deprecated **/
   float numbinsf = float(numbins);
-  return float(int32_t((val - min) / (max - min) * numbinsf)) * float(dimensionsize) / numbinsf;
+  return float(int32_t((val - min) / (max - min) * numbinsf)) * float(dimensionsize) /
+         numbinsf;
 }
 
 EXTENSION_NOINLINE
@@ -420,8 +460,9 @@ float rect_pixel_bin_x(const float valx,
     }
     min += offset * (maxx - minx) / imgwidthf;
   }
-  return float(int32_t((valx - min) / (maxx - min) * (imgwidthf - offset) / rectwidth)) * rectwidth + offset +
-         rectwidth / 2.0f;
+  return float(int32_t((valx - min) / (maxx - min) * (imgwidthf - offset) / rectwidth)) *
+             rectwidth +
+         offset + rectwidth / 2.0f;
 }
 
 EXTENSION_NOINLINE
@@ -441,8 +482,10 @@ float rect_pixel_bin_y(const float valy,
     }
     min += offset * (maxy - miny) / imgheightf;
   }
-  return float(int32_t((valy - min) / (maxy - min) * (imgheightf - offset) / rectheight)) * rectheight + offset +
-         rectheight / 2.0f;
+  return float(
+             int32_t((valy - min) / (maxy - min) * (imgheightf - offset) / rectheight)) *
+             rectheight +
+         offset + rectheight / 2.0f;
 }
 
 EXTENSION_NOINLINE

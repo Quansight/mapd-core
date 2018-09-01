@@ -18,6 +18,7 @@
 #define QUERYENGINE_RELALGTRANSLATOR_H
 
 #include "Execute.h"
+#include "QueryFeatures.h"
 #include "RelAlgAbstractInterpreter.h"
 
 #include <ctime>
@@ -44,13 +45,15 @@ class RelAlgTranslator {
                    const std::unordered_map<const RelAlgNode*, int>& input_to_nest_level,
                    const std::vector<JoinType>& join_types,
                    const time_t now,
-                   const bool just_explain)
-      : cat_(cat),
-        executor_(executor),
-        input_to_nest_level_(input_to_nest_level),
-        join_types_(join_types),
-        now_(now),
-        just_explain_(just_explain) {}
+                   const bool just_explain,
+                   QueryFeatureDescriptor& feature_stash)
+      : cat_(cat)
+      , executor_(executor)
+      , input_to_nest_level_(input_to_nest_level)
+      , join_types_(join_types)
+      , now_(now)
+      , just_explain_(just_explain)
+      , feature_stash_(feature_stash) {}
 
   std::shared_ptr<Analyzer::Expr> translateScalarRex(const RexScalar* rex) const;
 
@@ -108,26 +111,37 @@ class RelAlgTranslator {
 
   std::shared_ptr<Analyzer::Expr> translateOffsetInFragment() const;
 
+  std::shared_ptr<Analyzer::Expr> translateArrayFunction(
+      const RexFunctionOperator*) const;
+
   std::shared_ptr<Analyzer::Expr> translateFunction(const RexFunctionOperator*) const;
 
-  std::vector<std::shared_ptr<Analyzer::Expr>> translateFunctionArgs(const RexFunctionOperator*) const;
+  Analyzer::ExpressionPtrVector translateFunctionArgs(const RexFunctionOperator*) const;
 
-  std::shared_ptr<Analyzer::Expr> translateUnaryGeoFunction(const RexFunctionOperator*) const;
+  std::shared_ptr<Analyzer::Expr> translateUnaryGeoFunction(
+      const RexFunctionOperator*) const;
 
-  std::shared_ptr<Analyzer::Expr> translateBinaryGeoFunction(const RexFunctionOperator*) const;
+  std::shared_ptr<Analyzer::Expr> translateBinaryGeoFunction(
+      const RexFunctionOperator*) const;
 
-  std::vector<std::shared_ptr<Analyzer::Expr>> translateGeoFunctionArg(const RexScalar* rex_scalar,
-                                                                       SQLTypeInfo& arg_ti,
-                                                                       int32_t& lindex,
-                                                                       const bool with_bounds,
-                                                                       const bool expand_geo_col = false) const;
+  std::vector<std::shared_ptr<Analyzer::Expr>> translateGeoFunctionArg(
+      const RexScalar* rex_scalar,
+      SQLTypeInfo& arg_ti,
+      int32_t& lindex,
+      const bool with_bounds,
+      const bool with_render_group,
+      const bool expand_geo_col) const;
 
-  std::vector<std::shared_ptr<Analyzer::Expr>> translateGeoColumn(const RexInput*,
-                                                                  SQLTypeInfo&,
-                                                                  const bool with_bounds,
-                                                                  const bool expand_geo_col = false) const;
+  std::vector<std::shared_ptr<Analyzer::Expr>> translateGeoColumn(
+      const RexInput*,
+      SQLTypeInfo&,
+      const bool with_bounds,
+      const bool with_render_group,
+      const bool expand_geo_col) const;
 
-  std::vector<std::shared_ptr<Analyzer::Expr>> translateGeoLiteral(const RexLiteral*, SQLTypeInfo&, bool) const;
+  std::vector<std::shared_ptr<Analyzer::Expr>> translateGeoLiteral(const RexLiteral*,
+                                                                   SQLTypeInfo&,
+                                                                   bool) const;
 
   const Catalog_Namespace::Catalog& cat_;
   const Executor* executor_;
@@ -135,6 +149,7 @@ class RelAlgTranslator {
   const std::vector<JoinType> join_types_;
   time_t now_;
   const bool just_explain_;
+  QueryFeatureDescriptor& feature_stash_;
 };
 
 struct QualsConjunctiveForm {
@@ -142,8 +157,10 @@ struct QualsConjunctiveForm {
   const std::list<std::shared_ptr<Analyzer::Expr>> quals;
 };
 
-QualsConjunctiveForm qual_to_conjunctive_form(const std::shared_ptr<Analyzer::Expr> qual_expr);
+QualsConjunctiveForm qual_to_conjunctive_form(
+    const std::shared_ptr<Analyzer::Expr> qual_expr);
 
-std::vector<std::shared_ptr<Analyzer::Expr>> qual_to_disjunctive_form(const std::shared_ptr<Analyzer::Expr>& qual_expr);
+std::vector<std::shared_ptr<Analyzer::Expr>> qual_to_disjunctive_form(
+    const std::shared_ptr<Analyzer::Expr>& qual_expr);
 
 #endif  // QUERYENGINE_RELALGTRANSLATOR_H

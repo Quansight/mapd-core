@@ -17,12 +17,12 @@
 #include "Execute.h"
 #include "ResultSet.h"
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/types.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 
 #include "arrow/api.h"
@@ -45,6 +45,18 @@ typedef boost::variant<std::vector<bool>,
                        std::vector<double>,
                        std::vector<std::string>>
     ValueArray;
+
+#ifdef HAVE_ARROW_STATIC_RECORDBATCH_CTOR
+#define ARROW_RECORDBATCH_MAKE arrow::RecordBatch::Make
+#else
+#define ARROW_RECORDBATCH_MAKE std::make_shared<arrow::RecordBatch>
+#endif
+
+#ifdef HAVE_ARROW_APPENDVALUES
+#define APPENDVALUES AppendValues
+#else
+#define APPENDVALUES Append
+#endif
 
 namespace {
 
@@ -138,6 +150,10 @@ void create_or_append_validity(const ScalarTargetValue& value,
     is_valid = inline_int_null_val(col_type) != static_cast<int32_t>(*pvalue);
   } else if (col_type.is_integer()) {
     is_valid = inline_int_null_val(col_type) != static_cast<int64_t>(*pvalue);
+  } else if (col_type.get_type() == kTIMESTAMP) {
+    is_valid = inline_int_null_val(col_type) != static_cast<int64_t>(*pvalue);
+  } else if (col_type.get_type() == kTIME || col_type.get_type() == kDATE) {
+    is_valid = inline_int_null_val(col_type) != static_cast<int64_t>(*pvalue);
   } else {
     CHECK(col_type.is_fp());
     is_valid = inline_fp_null_val(col_type) != static_cast<double>(*pvalue);
@@ -154,7 +170,8 @@ void create_or_append_validity(const ScalarTargetValue& value,
 
 namespace arrow {
 
-static TypePtr get_arrow_type(const SQLTypeInfo& mapd_type, const std::shared_ptr<Array>& dict_values) {
+static TypePtr get_arrow_type(const SQLTypeInfo& mapd_type,
+                              const std::shared_ptr<Array>& dict_values) {
   switch (get_physical_type(mapd_type)) {
     case kBOOLEAN:
       return boolean();
@@ -175,7 +192,8 @@ static TypePtr get_arrow_type(const SQLTypeInfo& mapd_type, const std::shared_pt
     case kTEXT:
       if (is_dict_enc_str(mapd_type)) {
         CHECK(dict_values);
-        const auto index_type = get_arrow_type(get_dict_index_type_info(mapd_type), nullptr);
+        const auto index_type =
+            get_arrow_type(get_dict_index_type_info(mapd_type), nullptr);
         return dictionary(index_type, dict_values);
       }
       return utf8();
@@ -187,12 +205,26 @@ static TypePtr get_arrow_type(const SQLTypeInfo& mapd_type, const std::shared_pt
     case kDATE:
       return date32();
     case kTIMESTAMP:
-      return timestamp(TimeUnit::SECOND);
+      switch (mapd_type.get_precision()) {
+        case 0:
+          return timestamp(TimeUnit::SECOND);
+        case 3:
+          return timestamp(TimeUnit::MILLI);
+        case 6:
+          return timestamp(TimeUnit::MICRO);
+        case 9:
+          return timestamp(TimeUnit::NANO);
+        default:
+          throw std::runtime_error(
+              "Unsupported timestamp precision for Arrow result sets: " +
+              std::to_string(mapd_type.get_precision()));
+      }
     case kARRAY:
     case kINTERVAL_DAY_TIME:
     case kINTERVAL_YEAR_MONTH:
     default:
-      throw std::runtime_error(mapd_type.get_type_name() + " is not supported in temporary table.");
+      throw std::runtime_error(mapd_type.get_type_name() +
+                               " is not supported in Arrow result sets.");
   }
   return nullptr;
 }
@@ -207,27 +239,51 @@ struct ColumnBuilder {
     this->field = field;
 
     this->col_type = col_type;
-    this->physical_type = is_dict_enc_str(col_type) ? get_dict_index_type(col_type) : get_physical_type(col_type);
+    this->physical_type = is_dict_enc_str(col_type) ? get_dict_index_type(col_type)
+                                                    : get_physical_type(col_type);
 
     auto value_type = field->type();
     if (value_type->id() == Type::DICTIONARY) {
       value_type = static_cast<const DictionaryType&>(*value_type).index_type();
     }
-    ARROW_THROW_NOT_OK(arrow::MakeBuilder(default_memory_pool(), value_type, &this->builder));
+    ARROW_THROW_NOT_OK(
+        arrow::MakeBuilder(default_memory_pool(), value_type, &this->builder));
   }
 
-  void reserve(size_t row_count) { ARROW_THROW_NOT_OK(builder->Reserve(static_cast<int64_t>(row_count))); }
+  void reserve(size_t row_count) {
+    ARROW_THROW_NOT_OK(builder->Reserve(static_cast<int64_t>(row_count)));
+  }
 
   template <typename BuilderType, typename C_TYPE>
-  inline void append_to_builder(const ValueArray& values, const std::shared_ptr<std::vector<bool>>& is_valid) {
+  inline void append_to_datebuilder(const ValueArray& values,
+                                    const std::shared_ptr<std::vector<bool>>& is_valid) {
+    const std::vector<C_TYPE>& vals = boost::get<std::vector<C_TYPE>>(values);
+
+    std::vector<C_TYPE> vals_scaled(vals.size());
+    std::transform(vals.begin(), vals.end(), vals_scaled.begin(), [](C_TYPE a) -> C_TYPE {
+      return a / (60 * 60 * 24);
+    });
+
+    auto typed_builder = static_cast<BuilderType*>(this->builder.get());
+    if (this->field->nullable()) {
+      CHECK(is_valid.get());
+      ARROW_THROW_NOT_OK(typed_builder->APPENDVALUES(vals_scaled, *is_valid));
+    } else {
+      ARROW_THROW_NOT_OK(typed_builder->APPENDVALUES(vals_scaled));
+    }
+  }
+
+  template <typename BuilderType, typename C_TYPE>
+  inline void append_to_builder(const ValueArray& values,
+                                const std::shared_ptr<std::vector<bool>>& is_valid) {
     const std::vector<C_TYPE>& vals = boost::get<std::vector<C_TYPE>>(values);
 
     auto typed_builder = static_cast<BuilderType*>(this->builder.get());
     if (this->field->nullable()) {
       CHECK(is_valid.get());
-      ARROW_THROW_NOT_OK(typed_builder->Append(vals, *is_valid));
+      ARROW_THROW_NOT_OK(typed_builder->APPENDVALUES(vals, *is_valid));
     } else {
-      ARROW_THROW_NOT_OK(typed_builder->Append(vals));
+      ARROW_THROW_NOT_OK(typed_builder->APPENDVALUES(vals));
     }
   }
 
@@ -241,7 +297,8 @@ struct ColumnBuilder {
     }
   }
 
-  void append(const ValueArray& values, const std::shared_ptr<std::vector<bool>>& is_valid) {
+  void append(const ValueArray& values,
+              const std::shared_ptr<std::vector<bool>>& is_valid) {
     switch (this->physical_type) {
       case kBOOLEAN:
         append_to_builder<BooleanBuilder, bool>(values, is_valid);
@@ -264,9 +321,22 @@ struct ColumnBuilder {
       case kDOUBLE:
         append_to_builder<DoubleBuilder, double>(values, is_valid);
         break;
+      case kTIME:
+        append_to_builder<Time32Builder, int32_t>(values, is_valid);
+        break;
+      case kTIMESTAMP:
+        append_to_builder<TimestampBuilder, int64_t>(values, is_valid);
+        break;
+      case kDATE:
+        append_to_datebuilder<Date32Builder, int32_t>(values, is_valid);
+        break;
+      case kCHAR:
+      case kVARCHAR:
+      case kTEXT:
       default:
         // TODO(miyu): support more scalar types.
-        CHECK(false);
+        throw std::runtime_error(this->col_type.get_type_name() +
+                                 " is not supported in Arrow result sets.");
     }
   }
 };
@@ -283,10 +353,13 @@ void print_serialized_schema(const uint8_t* data, const size_t length) {
   ARROW_THROW_NOT_OK(ipc::ReadSchema(&reader, &schema));
 
   std::cout << "Arrow Schema: " << std::endl;
-  ARROW_THROW_NOT_OK(PrettyPrint(*schema, {}, &std::cout));
+  const PrettyPrintOptions options{0};
+  ARROW_THROW_NOT_OK(PrettyPrint(*(schema.get()), options, &std::cout));
 }
 
-void print_serialized_records(const uint8_t* data, const size_t length, const std::shared_ptr<Schema>& schema) {
+void print_serialized_records(const uint8_t* data,
+                              const size_t length,
+                              const std::shared_ptr<Schema>& schema) {
   if (data == nullptr || !length) {
     std::cout << "No row found" << std::endl;
     return;
@@ -310,15 +383,17 @@ key_t get_and_copy_to_shm(const std::shared_ptr<Buffer>& data) {
   auto key = static_cast<key_t>(rand());
   const auto shmsz = data->size();
   int shmid = -1;
-  // IPC_CREAT - indicates we want to create a new segment for this key if it doesn't exist
-  // IPC_EXCL - ensures failure if a segment already exists for this key
+  // IPC_CREAT - indicates we want to create a new segment for this key if it doesn't
+  // exist IPC_EXCL - ensures failure if a segment already exists for this key
   while ((shmid = shmget(key, shmsz, IPC_CREAT | IPC_EXCL | 0666)) < 0) {
     // If shmget fails and errno is one of these four values, try a new key.
-    // TODO(ptaylor): is checking for the last three values really necessary? Checking them by default to be safe.
-    // EEXIST - a shared memory segment is already associated with this key
-    // EACCES - a shared memory segment is already associated with this key, but we don't have permission to access it
-    // EINVAL - a shared memory segment is already associated with this key, but the size is less than shmsz
-    // ENOENT - IPC_CREAT was not set in shmflg and no shared memory segment associated with key was found
+    // TODO(ptaylor): is checking for the last three values really necessary? Checking
+    // them by default to be safe. EEXIST - a shared memory segment is already associated
+    // with this key EACCES - a shared memory segment is already associated with this key,
+    // but we don't have permission to access it EINVAL - a shared memory segment is
+    // already associated with this key, but the size is less than shmsz ENOENT -
+    // IPC_CREAT was not set in shmflg and no shared memory segment associated with key
+    // was found
     if (!(errno & (EEXIST | EACCES | EINVAL | ENOENT))) {
       throw std::runtime_error("failed to create a shared memory");
     }
@@ -331,8 +406,8 @@ key_t get_and_copy_to_shm(const std::shared_ptr<Buffer>& data) {
   }
 
   // copy the arrow records buffer to shared memory
-  // TODO(ptaylor): I'm sure it's possible to tell Arrow's RecordBatchStreamWriter to write
-  // directly to the shared memory segment as a sink
+  // TODO(ptaylor): I'm sure it's possible to tell Arrow's RecordBatchStreamWriter to
+  // write directly to the shared memory segment as a sink
   memcpy(ipc_ptr, data->data(), data->size());
   // detach from the shared memory segment
   shmdt(ipc_ptr);
@@ -341,18 +416,21 @@ key_t get_and_copy_to_shm(const std::shared_ptr<Buffer>& data) {
 
 }  // namespace arrow
 
-std::shared_ptr<const std::vector<std::string>> ResultSet::getDictionary(const int dict_id) const {
-  const auto sdp = executor_ ? executor_->getStringDictionaryProxy(dict_id, row_set_mem_owner_, false)
-                             : row_set_mem_owner_->getStringDictProxy(dict_id);
+std::shared_ptr<const std::vector<std::string>> ResultSet::getDictionary(
+    const int dict_id) const {
+  const auto sdp =
+      executor_ ? executor_->getStringDictionaryProxy(dict_id, row_set_mem_owner_, false)
+                : row_set_mem_owner_->getStringDictProxy(dict_id);
   return sdp->getDictionary()->copyStrings();
 }
 
-std::shared_ptr<arrow::RecordBatch> ResultSet::getArrowBatch(const std::shared_ptr<arrow::Schema>& schema) const {
+std::shared_ptr<arrow::RecordBatch> ResultSet::getArrowBatch(
+    const std::shared_ptr<arrow::Schema>& schema) const {
   std::vector<std::shared_ptr<arrow::Array>> result_columns;
 
   const auto entry_count = entryCount();
   if (!entry_count) {
-    return std::make_shared<arrow::RecordBatch>(schema, 0, result_columns);
+    return ARROW_RECORDBATCH_MAKE(schema, 0, result_columns);
   }
   const auto col_count = colCount();
   size_t row_count = 0;
@@ -386,36 +464,69 @@ std::shared_ptr<arrow::RecordBatch> ResultSet::getArrowBatch(const std::shared_p
         const auto& column = builders[j];
         switch (column.physical_type) {
           case kBOOLEAN:
-            create_or_append_value<bool, int64_t>(*scalar_value, value_seg[j], entry_count);
-            create_or_append_validity<int64_t>(*scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            create_or_append_value<bool, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
             break;
           case kTINYINT:
-            create_or_append_value<int8_t, int64_t>(*scalar_value, value_seg[j], entry_count);
-            create_or_append_validity<int64_t>(*scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            create_or_append_value<int8_t, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
             break;
           case kSMALLINT:
-            create_or_append_value<int16_t, int64_t>(*scalar_value, value_seg[j], entry_count);
-            create_or_append_validity<int64_t>(*scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            create_or_append_value<int16_t, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
             break;
           case kINT:
-            create_or_append_value<int32_t, int64_t>(*scalar_value, value_seg[j], entry_count);
-            create_or_append_validity<int64_t>(*scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            create_or_append_value<int32_t, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
             break;
           case kBIGINT:
-            create_or_append_value<int64_t, int64_t>(*scalar_value, value_seg[j], entry_count);
-            create_or_append_validity<int64_t>(*scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            create_or_append_value<int64_t, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
             break;
           case kFLOAT:
-            create_or_append_value<float, float>(*scalar_value, value_seg[j], entry_count);
-            create_or_append_validity<float>(*scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            create_or_append_value<float, float>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<float>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
             break;
           case kDOUBLE:
-            create_or_append_value<double, double>(*scalar_value, value_seg[j], entry_count);
-            create_or_append_validity<double>(*scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            create_or_append_value<double, double>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<double>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            break;
+          case kTIME:
+            create_or_append_value<int32_t, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            break;
+          case kDATE:
+            create_or_append_value<int32_t, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
+            break;
+          case kTIMESTAMP:
+            create_or_append_value<int64_t, int64_t>(
+                *scalar_value, value_seg[j], entry_count);
+            create_or_append_validity<int64_t>(
+                *scalar_value, column.col_type, null_bitmap_seg[j], entry_count);
             break;
           default:
             // TODO(miyu): support more scalar types.
-            CHECK(false);
+            throw std::runtime_error(column.col_type.get_type_name() +
+                                     " is not supported in Arrow result sets.");
         }
       }
     }
@@ -433,7 +544,8 @@ std::shared_ptr<arrow::RecordBatch> ResultSet::getArrowBatch(const std::shared_p
     std::vector<std::vector<std::shared_ptr<std::vector<bool>>>> null_bitmap_segs(
         cpu_count, std::vector<std::shared_ptr<std::vector<bool>>>(col_count, nullptr));
     const auto stride = (entry_count + cpu_count - 1) / cpu_count;
-    for (size_t i = 0, start_entry = 0; start_entry < entry_count; ++i, start_entry += stride) {
+    for (size_t i = 0, start_entry = 0; start_entry < entry_count;
+         ++i, start_entry += stride) {
       const auto end_entry = std::min(entry_count, start_entry + stride);
       child_threads.push_back(std::async(std::launch::async,
                                          fetch,
@@ -465,11 +577,12 @@ std::shared_ptr<arrow::RecordBatch> ResultSet::getArrowBatch(const std::shared_p
   for (size_t i = 0; i < col_count; ++i) {
     result_columns.push_back(builders[i].finish());
   }
-  return std::make_shared<arrow::RecordBatch>(schema, row_count, result_columns);
+  return ARROW_RECORDBATCH_MAKE(schema, row_count, result_columns);
 }
 
-std::shared_ptr<arrow::RecordBatch> ResultSet::convertToArrow(const std::vector<std::string>& col_names,
-                                                              arrow::ipc::DictionaryMemo& memo) const {
+std::shared_ptr<arrow::RecordBatch> ResultSet::convertToArrow(
+    const std::vector<std::string>& col_names,
+    arrow::ipc::DictionaryMemo& memo) const {
   const auto col_count = colCount();
   std::vector<std::shared_ptr<arrow::Field>> fields;
   CHECK(col_names.empty() || col_names.size() == col_count);
@@ -484,6 +597,8 @@ std::shared_ptr<arrow::RecordBatch> ResultSet::convertToArrow(const std::vector<
         auto str_list = getDictionary(dict_id);
 
         arrow::StringBuilder builder;
+        // TODO(andrewseidl): replace with AppendValues() once Arrow 0.7.1 support is
+        // fully deprecated
         for (const std::string& val : *str_list) {
           ARROW_THROW_NOT_OK(builder.Append(val));
         }
@@ -496,25 +611,29 @@ std::shared_ptr<arrow::RecordBatch> ResultSet::convertToArrow(const std::vector<
   return getArrowBatch(arrow::schema(fields));
 }
 
-ResultSet::SerializedArrowOutput ResultSet::getSerializedArrowOutput(const std::vector<std::string>& col_names) const {
+ResultSet::SerializedArrowOutput ResultSet::getSerializedArrowOutput(
+    const std::vector<std::string>& col_names) const {
   arrow::ipc::DictionaryMemo dict_memo;
   std::shared_ptr<arrow::RecordBatch> arrow_copy = convertToArrow(col_names, dict_memo);
   std::shared_ptr<arrow::Buffer> serialized_records, serialized_schema;
 
-  ARROW_THROW_NOT_OK(
-      arrow::ipc::SerializeSchema(*arrow_copy->schema(), arrow::default_memory_pool(), &serialized_schema));
+  ARROW_THROW_NOT_OK(arrow::ipc::SerializeSchema(
+      *arrow_copy->schema(), arrow::default_memory_pool(), &serialized_schema));
 
-  ARROW_THROW_NOT_OK(arrow::ipc::SerializeRecordBatch(*arrow_copy, arrow::default_memory_pool(), &serialized_records));
+  ARROW_THROW_NOT_OK(arrow::ipc::SerializeRecordBatch(
+      *arrow_copy, arrow::default_memory_pool(), &serialized_records));
   return {serialized_schema, serialized_records};
 }
 
-// WARN(ptaylor): users are responsible for detaching and removing shared memory segments, e.g.,
+// WARN(ptaylor): users are responsible for detaching and removing shared memory segments,
+// e.g.,
 //   int shmid = shmget(...);
 //   auto ipc_ptr = shmat(shmid, ...);
 //   ...
 //   shmdt(ipc_ptr);
 //   shmctl(shmid, IPC_RMID, 0);
-ArrowResult ResultSet::getArrowCopyOnCpu(const std::vector<std::string>& col_names) const {
+ArrowResult ResultSet::getArrowCopyOnCpu(
+    const std::vector<std::string>& col_names) const {
   const auto serialized_arrow_output = getSerializedArrowOutput(col_names);
   const auto& serialized_schema = serialized_arrow_output.schema;
   const auto& serialized_records = serialized_arrow_output.records;
@@ -522,13 +641,21 @@ ArrowResult ResultSet::getArrowCopyOnCpu(const std::vector<std::string>& col_nam
   const auto schema_key = arrow::get_and_copy_to_shm(serialized_schema);
   CHECK(schema_key != IPC_PRIVATE);
   std::vector<char> schema_handle_buffer(sizeof(key_t), 0);
-  memcpy(&schema_handle_buffer[0], reinterpret_cast<const unsigned char*>(&schema_key), sizeof(key_t));
+  memcpy(&schema_handle_buffer[0],
+         reinterpret_cast<const unsigned char*>(&schema_key),
+         sizeof(key_t));
 
   const auto record_key = arrow::get_and_copy_to_shm(serialized_records);
   std::vector<char> record_handle_buffer(sizeof(key_t), 0);
-  memcpy(&record_handle_buffer[0], reinterpret_cast<const unsigned char*>(&record_key), sizeof(key_t));
+  memcpy(&record_handle_buffer[0],
+         reinterpret_cast<const unsigned char*>(&record_key),
+         sizeof(key_t));
 
-  return {schema_handle_buffer, serialized_schema->size(), record_handle_buffer, serialized_records->size(), nullptr};
+  return {schema_handle_buffer,
+          serialized_schema->size(),
+          record_handle_buffer,
+          serialized_records->size(),
+          nullptr};
 }
 
 // WARN(miyu): users are responsible to free all device copies, e.g.,
@@ -540,31 +667,37 @@ ArrowResult ResultSet::getArrowCopyOnCpu(const std::vector<std::string>& col_nam
 //   cudaFree(dev_ptr);
 //
 // TODO(miyu): verify if the server still needs to free its own copies after last uses
-ArrowResult ResultSet::getArrowCopyOnGpu(Data_Namespace::DataMgr* data_mgr,
-                                         const size_t device_id,
-                                         const std::vector<std::string>& col_names) const {
+ArrowResult ResultSet::getArrowCopyOnGpu(
+    Data_Namespace::DataMgr* data_mgr,
+    const size_t device_id,
+    const std::vector<std::string>& col_names) const {
   const auto serialized_arrow_output = getSerializedArrowOutput(col_names);
   const auto& serialized_schema = serialized_arrow_output.schema;
 
   const auto schema_key = arrow::get_and_copy_to_shm(serialized_schema);
   CHECK(schema_key != IPC_PRIVATE);
   std::vector<char> schema_handle_buffer(sizeof(key_t), 0);
-  memcpy(&schema_handle_buffer[0], reinterpret_cast<const unsigned char*>(&schema_key), sizeof(key_t));
+  memcpy(&schema_handle_buffer[0],
+         reinterpret_cast<const unsigned char*>(&schema_key),
+         sizeof(key_t));
 
 #ifdef HAVE_CUDA
   const auto& serialized_records = serialized_arrow_output.records;
   if (serialized_records->size()) {
     CHECK(data_mgr && data_mgr->cudaMgr_);
-    auto dev_ptr =
-        reinterpret_cast<CUdeviceptr>(data_mgr->cudaMgr_->allocateDeviceMem(serialized_records->size(), device_id));
+    auto dev_ptr = reinterpret_cast<CUdeviceptr>(
+        data_mgr->cudaMgr_->allocateDeviceMem(serialized_records->size(), device_id));
     CUipcMemHandle record_handle;
     cuIpcGetMemHandle(&record_handle, dev_ptr);
-    data_mgr->cudaMgr_->copyHostToDevice(reinterpret_cast<int8_t*>(dev_ptr),
-                                         reinterpret_cast<const int8_t*>(serialized_records->data()),
-                                         serialized_records->size(),
-                                         device_id);
+    data_mgr->cudaMgr_->copyHostToDevice(
+        reinterpret_cast<int8_t*>(dev_ptr),
+        reinterpret_cast<const int8_t*>(serialized_records->data()),
+        serialized_records->size(),
+        device_id);
     std::vector<char> record_handle_buffer(sizeof(record_handle), 0);
-    memcpy(&record_handle_buffer[0], reinterpret_cast<unsigned char*>(&record_handle), sizeof(CUipcMemHandle));
+    memcpy(&record_handle_buffer[0],
+           reinterpret_cast<unsigned char*>(&record_handle),
+           sizeof(CUipcMemHandle));
 
     return {schema_handle_buffer,
             serialized_schema->size(),
@@ -598,10 +731,12 @@ void deallocate_arrow_result(const ArrowResult& result,
   memcpy(&schema_key, &result.sm_handle[0], sizeof(key_t));
   auto shm_id = shmget(schema_key, result.sm_size, 0666);
   if (shm_id < 0) {
-    throw std::runtime_error("failed to get an valid shm ID w/ given shm key of the schema");
+    throw std::runtime_error(
+        "failed to get an valid shm ID w/ given shm key of the schema");
   }
   if (-1 == shmctl(shm_id, IPC_RMID, 0)) {
-    throw std::runtime_error("failed to deallocate Arrow schema on errorno(" + std::to_string(errno) + ")");
+    throw std::runtime_error("failed to deallocate Arrow schema on errorno(" +
+                             std::to_string(errno) + ")");
   }
 
   if (device_type == ExecutorDeviceType::CPU) {
@@ -610,7 +745,8 @@ void deallocate_arrow_result(const ArrowResult& result,
     memcpy(&df_key, &result.df_handle[0], sizeof(key_t));
     auto shm_id = shmget(df_key, result.df_size, 0666);
     if (shm_id < 0) {
-      throw std::runtime_error("failed to get an valid shm ID w/ given shm key of the data");
+      throw std::runtime_error(
+          "failed to get an valid shm ID w/ given shm key of the data");
     }
     if (-1 == shmctl(shm_id, IPC_RMID, 0)) {
       throw std::runtime_error("failed to deallocate Arrow data frame");

@@ -15,13 +15,15 @@
  */
 
 #include "Encoder.h"
-#include "NoneEncoder.h"
-#include "FixedLengthEncoder.h"
-#include "StringNoneEncoder.h"
-#include "ArrayNoneEncoder.h"
 #include <glog/logging.h>
+#include "ArrayNoneEncoder.h"
+#include "FixedLengthArrayNoneEncoder.h"
+#include "FixedLengthEncoder.h"
+#include "NoneEncoder.h"
+#include "StringNoneEncoder.h"
 
-Encoder* Encoder::Create(Data_Namespace::AbstractBuffer* buffer, const SQLTypeInfo sqlType) {
+Encoder* Encoder::Create(Data_Namespace::AbstractBuffer* buffer,
+                         const SQLTypeInfo sqlType) {
   switch (sqlType.get_compression()) {
     case kENCODING_NONE: {
       switch (sqlType.get_type()) {
@@ -59,8 +61,12 @@ Encoder* Encoder::Create(Data_Namespace::AbstractBuffer* buffer, const SQLTypeIn
         case kVARCHAR:
         case kCHAR:
           return new StringNoneEncoder(buffer);
-        case kARRAY:
+        case kARRAY: {
+          if (sqlType.get_size() > 0) {
+            return new FixedLengthArrayNoneEncoder(buffer, sqlType.get_size());
+          }
           return new ArrayNoneEncoder(buffer);
+        }
         case kTIME:
         case kTIMESTAMP:
         case kDATE:

@@ -29,16 +29,16 @@
 #ifndef DBOBJECT_H
 #define DBOBJECT_H
 
-#include <unordered_set>
-#include <string>
 #include <glog/logging.h>
+#include <string>
+#include <unordered_set>
 
 namespace Catalog_Namespace {
 class Catalog;
 }
 
-// DB objects for which privileges are currently supported, only ever add enums, never remove as the nums are persisted
-// in the catalog DB
+// DB objects for which privileges are currently supported, only ever add enums, never
+// remove as the nums are persisted in the catalog DB
 enum DBObjectType {
   AbstractDBObjectType = 0,
   DatabaseDBObjectType,
@@ -63,7 +63,8 @@ struct DBObjectKey {
     return memcmp(ids_a, ids_b, N_COLUMNS * sizeof(int32_t)) < 0;
   }
 
-  static DBObjectKey fromString(const std::vector<std::string>& key, const DBObjectType& type);
+  static DBObjectKey fromString(const std::vector<std::string>& key,
+                                const DBObjectType& type);
 };
 
 // Access privileges currently supported
@@ -72,6 +73,8 @@ struct DatabasePrivileges {
   static const int32_t ALL = -1;
   static const int32_t CREATE_DATABASE = 1 << 0;
   static const int32_t DROP_DATABASE = 1 << 1;
+  static const int32_t VIEW_SQL_EDITOR = 1 << 2;
+  static const int32_t ACCESS = 1 << 3;
 };
 
 struct TablePrivileges {
@@ -83,8 +86,10 @@ struct TablePrivileges {
   static const int32_t UPDATE_IN_TABLE = 1 << 4;
   static const int32_t DELETE_FROM_TABLE = 1 << 5;
   static const int32_t TRUNCATE_TABLE = 1 << 6;
+  static const int32_t ALTER_TABLE = 1 << 7;
 
-  static const int32_t ALL_MIGRATE = CREATE_TABLE | DROP_TABLE | SELECT_FROM_TABLE | INSERT_INTO_TABLE;
+  static const int32_t ALL_MIGRATE =
+      CREATE_TABLE | DROP_TABLE | SELECT_FROM_TABLE | INSERT_INTO_TABLE;
 };
 
 struct DashboardPrivileges {
@@ -94,7 +99,8 @@ struct DashboardPrivileges {
   static const int32_t VIEW_DASHBOARD = 1 << 2;
   static const int32_t EDIT_DASHBOARD = 1 << 3;
 
-  static const int32_t ALL_MIGRATE = CREATE_DASHBOARD | DELETE_DASHBOARD | VIEW_DASHBOARD | EDIT_DASHBOARD;
+  static const int32_t ALL_MIGRATE =
+      CREATE_DASHBOARD | DELETE_DASHBOARD | VIEW_DASHBOARD | EDIT_DASHBOARD;
 };
 
 struct ViewPrivileges {
@@ -107,8 +113,8 @@ struct ViewPrivileges {
   static const int32_t DELETE_FROM_VIEW = 1 << 5;
   static const int32_t TRUNCATE_VIEW = 1 << 6;
 
-  static const int32_t ALL_MIGRATE = CREATE_VIEW | DROP_VIEW | SELECT_FROM_VIEW | INSERT_INTO_VIEW;
-
+  static const int32_t ALL_MIGRATE =
+      CREATE_VIEW | DROP_VIEW | SELECT_FROM_VIEW | INSERT_INTO_VIEW;
 };
 
 struct AccessPrivileges {
@@ -120,7 +126,9 @@ struct AccessPrivileges {
 
   void reset() { privileges = 0L; }
   bool hasAny() const { return 0L != privileges; }
-  bool hasPermission(int permission) const { return permission == (privileges & permission); }
+  bool hasPermission(int permission) const {
+    return permission == (privileges & permission);
+  }
 
   void add(AccessPrivileges newprivs) { privileges |= newprivs.privileges; }
   void remove(AccessPrivileges newprivs) { privileges &= ~(newprivs.privileges); }
@@ -129,6 +137,8 @@ struct AccessPrivileges {
 
   // database permissions
   static const AccessPrivileges ALL_DATABASE;
+  static const AccessPrivileges VIEW_SQL_EDITOR;
+  static const AccessPrivileges ACCESS;
 
   // table permissions
   static const AccessPrivileges ALL_TABLE_MIGRATE;
@@ -140,6 +150,7 @@ struct AccessPrivileges {
   static const AccessPrivileges UPDATE_IN_TABLE;
   static const AccessPrivileges DELETE_FROM_TABLE;
   static const AccessPrivileges TRUNCATE_TABLE;
+  static const AccessPrivileges ALTER_TABLE;
 
   // dashboard permissions
   static const AccessPrivileges ALL_DASHBOARD_MIGRATE;
@@ -148,7 +159,6 @@ struct AccessPrivileges {
   static const AccessPrivileges VIEW_DASHBOARD;
   static const AccessPrivileges EDIT_DASHBOARD;
   static const AccessPrivileges DELETE_DASHBOARD;
-
 
   // view permissions
   static const AccessPrivileges ALL_VIEW_MIGRATE;
@@ -167,7 +177,11 @@ class DBObject {
   DBObject(const std::string& name, const DBObjectType& objectAndPermissionType);
   DBObject(const int32_t id, const DBObjectType& objectAndPermissionType);
   DBObject(DBObjectKey key, AccessPrivileges privs, int32_t owner)
-      : objectName_(""), objectType_(AbstractDBObjectType), objectKey_(key), objectPrivs_(privs), ownerId_(owner){};
+      : objectName_("")
+      , objectType_(AbstractDBObjectType)
+      , objectKey_(key)
+      , objectPrivs_(privs)
+      , ownerId_(owner){};
   DBObject(const DBObject& object);
   ~DBObject() {}
 

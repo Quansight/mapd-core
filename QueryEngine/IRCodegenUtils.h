@@ -21,6 +21,54 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
 
+inline llvm::ArrayType* get_int_array_type(int const width,
+                                           int count,
+                                           llvm::LLVMContext& context) {
+  switch (width) {
+    case 64:
+      return llvm::ArrayType::get(llvm::Type::getInt64Ty(context), count);
+    case 32:
+      return llvm::ArrayType::get(llvm::Type::getInt32Ty(context), count);
+      break;
+    case 16:
+      return llvm::ArrayType::get(llvm::Type::getInt16Ty(context), count);
+      break;
+    case 8:
+      return llvm::ArrayType::get(llvm::Type::getInt8Ty(context), count);
+      break;
+    case 1:
+      return llvm::ArrayType::get(llvm::Type::getInt1Ty(context), count);
+      break;
+    default:
+      LOG(FATAL) << "Unsupported integer width: " << width;
+  }
+  return nullptr;
+}
+
+inline llvm::VectorType* get_int_vector_type(int const width,
+                                             int count,
+                                             llvm::LLVMContext& context) {
+  switch (width) {
+    case 64:
+      return llvm::VectorType::get(llvm::Type::getInt64Ty(context), count);
+    case 32:
+      return llvm::VectorType::get(llvm::Type::getInt32Ty(context), count);
+      break;
+    case 16:
+      return llvm::VectorType::get(llvm::Type::getInt16Ty(context), count);
+      break;
+    case 8:
+      return llvm::VectorType::get(llvm::Type::getInt8Ty(context), count);
+      break;
+    case 1:
+      return llvm::VectorType::get(llvm::Type::getInt1Ty(context), count);
+      break;
+    default:
+      LOG(FATAL) << "Unsupported integer width: " << width;
+  }
+  return nullptr;
+}
+
 inline llvm::Type* get_int_type(const int width, llvm::LLVMContext& context) {
   switch (width) {
     case 64:
@@ -46,9 +94,11 @@ inline llvm::Type* get_int_type(const int width, llvm::LLVMContext& context) {
 
 template <class T>
 inline llvm::ConstantInt* ll_int(const T v, llvm::LLVMContext& context) {
-  return static_cast<llvm::ConstantInt*>(llvm::ConstantInt::get(get_int_type(sizeof(v) * 8, context), v));
+  return static_cast<llvm::ConstantInt*>(
+      llvm::ConstantInt::get(get_int_type(sizeof(v) * 8, context), v));
 }
 
 inline llvm::ConstantInt* ll_bool(const bool v, llvm::LLVMContext& context) {
-  return static_cast<llvm::ConstantInt*>(llvm::ConstantInt::get(get_int_type(1, context), v));
+  return static_cast<llvm::ConstantInt*>(
+      llvm::ConstantInt::get(get_int_type(1, context), v));
 }

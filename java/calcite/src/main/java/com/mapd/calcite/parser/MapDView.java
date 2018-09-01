@@ -15,6 +15,9 @@
  */
 package com.mapd.calcite.parser;
 
+import static com.mapd.calcite.parser.MapDParser.CURRENT_PARSER;
+import java.util.ArrayList;
+
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.prepare.SqlIdentifierCapturer;
 import org.apache.calcite.rel.RelNode;
@@ -34,14 +37,12 @@ import com.mapd.thrift.server.TTableDetails;
 public class MapDView extends MapDTable implements TranslatableTable {
 
   final static Logger MAPDLOGGER = LoggerFactory.getLogger(MapDView.class);
-  final MapDParser parser;
   private final String viewSql;
   private SqlIdentifierCapturer accessObjects;
 
   public MapDView(String view_sql, TTableDetails ri, MapDParser mp) {
     super(ri);
     this.viewSql = view_sql;
-    parser = mp;
     try {
       accessObjects = mp.captureIdentifiers(view_sql, true);
     } catch (SqlParseException e) {
@@ -66,7 +67,7 @@ public class MapDView extends MapDTable implements TranslatableTable {
   @Override
   public RelNode toRel(RelOptTable.ToRelContext context, RelOptTable relOptTable) {
     try {
-      return parser.queryToSqlNode(viewSql, true).rel;
+      return CURRENT_PARSER.get().queryToSqlNode(viewSql, new ArrayList<>(), true).rel;
     } catch (SqlParseException ex) {
       assert false;
       return null;
@@ -82,7 +83,7 @@ public class MapDView extends MapDTable implements TranslatableTable {
   @Override
   public RelDataType getRowType(RelDataTypeFactory rdtf) {
     try {
-      final RelRoot relAlg = parser.queryToSqlNode(viewSql, true);
+      final RelRoot relAlg = CURRENT_PARSER.get().queryToSqlNode(viewSql, new ArrayList<>(), true);
       return relAlg.validatedRowType;
     } catch (SqlParseException e) {
       assert false;

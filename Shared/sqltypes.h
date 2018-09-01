@@ -27,14 +27,14 @@
 #include "funcannotations.h"
 
 #include <stdint.h>
-#include <ctime>
+#include <cassert>
 #include <cfloat>
+#include <ctime>
 #include <limits>
 #include <memory>
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <cassert>
 
 // must not change because these values persist in catalogs.
 enum SQLTypes {
@@ -87,7 +87,8 @@ struct ArrayDatum {
 
   DEVICE ArrayDatum() : length(0), pointer(NULL), is_null(true) {}
 #ifndef __CUDACC__
-  ArrayDatum(int l, int8_t* p, bool n) : length(l), pointer(p), is_null(n), data_ptr(p, [](int8_t* p) { free(p); }) {}
+  ArrayDatum(int l, int8_t* p, bool n)
+      : length(l), pointer(p), is_null(n), data_ptr(p, [](int8_t* p) { free(p); }) {}
 #else
   ArrayDatum(int l, int8_t* p, bool n) : length(l), pointer(p), is_null(n) {}
 #endif
@@ -128,13 +129,20 @@ enum EncodingType {
   kENCODING_LAST = 7
 };
 
-#define IS_INTEGER(T) (((T) == kINT) || ((T) == kSMALLINT) || ((T) == kBIGINT) || ((T) == kTINYINT))
-#define IS_NUMBER(T)                                                                                 \
-  (((T) == kINT) || ((T) == kSMALLINT) || ((T) == kDOUBLE) || ((T) == kFLOAT) || ((T) == kBIGINT) || \
-   ((T) == kNUMERIC) || ((T) == kDECIMAL) || ((T) == kTINYINT))
+#include "SQLTypeUtilities.h"
+
+#define IS_INTEGER(T) \
+  (((T) == kINT) || ((T) == kSMALLINT) || ((T) == kBIGINT) || ((T) == kTINYINT))
+#define IS_NUMBER(T)                                                             \
+  (((T) == kINT) || ((T) == kSMALLINT) || ((T) == kDOUBLE) || ((T) == kFLOAT) || \
+   ((T) == kBIGINT) || ((T) == kNUMERIC) || ((T) == kDECIMAL) || ((T) == kTINYINT))
 #define IS_STRING(T) (((T) == kTEXT) || ((T) == kVARCHAR) || ((T) == kCHAR))
 #define IS_TIME(T) (((T) == kTIME) || ((T) == kTIMESTAMP) || ((T) == kDATE))
-#define IS_GEO(T) (((T) == kPOINT) || ((T) == kLINESTRING) || ((T) == kPOLYGON) || ((T) == kMULTIPOLYGON))
+#define IS_GEO(T) \
+  (((T) == kPOINT) || ((T) == kLINESTRING) || ((T) == kPOLYGON) || ((T) == kMULTIPOLYGON))
+#define IS_INTERVAL(T) ((T) == kINTERVAL_DAY_TIME || (T) == kINTERVAL_YEAR_MONTH)
+#define IS_DECIMAL(T) ((T) == kNUMERIC || (T) == kDECIMAL)
+#define IS_GEO_POLY(T) (((T) == kPOLYGON) || ((T) == kMULTIPOLYGON))
 
 #define NULL_BOOLEAN INT8_MIN
 #define NULL_TINYINT INT8_MIN
@@ -148,56 +156,89 @@ enum EncodingType {
 #define TRANSIENT_DICT(ID) (-(ID))
 #define REGULAR_DICT(TRANSIENTID) (-(TRANSIENTID))
 
+template <typename CORE_TYPE>
+class ExecutorTypePackaging {
+ public:
+  enum PackagingType { Chunk, StandardBuffer };
+
+  ExecutorTypePackaging() : packaging_type_(Chunk) {}
+
+  bool isStandardBufferPackaging() const { return packaging_type_ == StandardBuffer; }
+  bool isChunkIteratorPackaging() const { return packaging_type_ == Chunk; }
+  void setStandardBufferPackaging() { packaging_type_ = StandardBuffer; }
+  void setChunkIteratorPackaging() { packaging_type_ = Chunk; }
+
+ private:
+  PackagingType packaging_type_;
+};
+
+template <typename CORE_TYPE>
+class ArrayContextTypeSizer {
+ public:
+  inline int get_array_context_logical_size() const {
+    CORE_TYPE const* derived(static_cast<CORE_TYPE const*>(this));
+    if (is_member_of_typeset<kCHAR, kTEXT, kVARCHAR>(*derived)) {
+      auto comp_type(derived->get_compression());
+      if (comp_type == kENCODING_DICT || comp_type == kENCODING_FIXED ||
+          comp_type == kENCODING_NONE) {
+        return sizeof(int32_t);
+      }
+    }
+    return derived->get_logical_size();
+  }
+};
+
 // @type SQLTypeInfo
 // @brief a structure to capture all type information including
 // length, precision, scale, etc.
-class SQLTypeInfo {
+template <template <class> class... TYPE_FACET_PACK>
+class SQLTypeInfoCore : public TYPE_FACET_PACK<SQLTypeInfoCore<TYPE_FACET_PACK...> >... {
  public:
-  SQLTypeInfo(SQLTypes t, int d, int s, bool n, EncodingType c, int p, SQLTypes st)
-      : type(t),
-        subtype(st),
-        dimension(d),
-        scale(s),
-        notnull(n),
-        compression(c),
-        comp_param(p),
-        size(get_storage_size()) {}
-  SQLTypeInfo(SQLTypes t, int d, int s, bool n)
-      : type(t),
-        subtype(kNULLT),
-        dimension(d),
-        scale(s),
-        notnull(n),
-        compression(kENCODING_NONE),
-        comp_param(0),
-        size(get_storage_size()) {}
-  SQLTypeInfo(SQLTypes t, bool n)
-      : type(t),
-        subtype(kNULLT),
-        dimension(0),
-        scale(0),
-        notnull(n),
-        compression(kENCODING_NONE),
-        comp_param(0),
-        size(get_storage_size()) {}
-  SQLTypeInfo(SQLTypes t, bool n, EncodingType c)
-      : type(t),
-        subtype(kNULLT),
-        dimension(0),
-        scale(0),
-        notnull(n),
-        compression(c),
-        comp_param(0),
-        size(get_storage_size()) {}
-  SQLTypeInfo()
-      : type(kNULLT),
-        subtype(kNULLT),
-        dimension(0),
-        scale(0),
-        notnull(false),
-        compression(kENCODING_NONE),
-        comp_param(0),
-        size(0) {}
+  SQLTypeInfoCore(SQLTypes t, int d, int s, bool n, EncodingType c, int p, SQLTypes st)
+      : type(t)
+      , subtype(st)
+      , dimension(d)
+      , scale(s)
+      , notnull(n)
+      , compression(c)
+      , comp_param(p)
+      , size(get_storage_size()) {}
+  SQLTypeInfoCore(SQLTypes t, int d, int s, bool n)
+      : type(t)
+      , subtype(kNULLT)
+      , dimension(d)
+      , scale(s)
+      , notnull(n)
+      , compression(kENCODING_NONE)
+      , comp_param(0)
+      , size(get_storage_size()) {}
+  SQLTypeInfoCore(SQLTypes t, bool n)
+      : type(t)
+      , subtype(kNULLT)
+      , dimension(0)
+      , scale(0)
+      , notnull(n)
+      , compression(kENCODING_NONE)
+      , comp_param(0)
+      , size(get_storage_size()) {}
+  SQLTypeInfoCore(SQLTypes t, bool n, EncodingType c)
+      : type(t)
+      , subtype(kNULLT)
+      , dimension(0)
+      , scale(0)
+      , notnull(n)
+      , compression(c)
+      , comp_param(0)
+      , size(get_storage_size()) {}
+  SQLTypeInfoCore()
+      : type(kNULLT)
+      , subtype(kNULLT)
+      , dimension(0)
+      , scale(0)
+      , notnull(false)
+      , compression(kENCODING_NONE)
+      , comp_param(0)
+      , size(0) {}
 
   HOST DEVICE inline SQLTypes get_type() const { return type; }
   HOST DEVICE inline SQLTypes get_subtype() const { return subtype; }
@@ -212,7 +253,7 @@ class SQLTypeInfo {
   HOST DEVICE inline int get_size() const { return size; }
   inline int get_logical_size() const {
     if (compression == kENCODING_FIXED) {
-      SQLTypeInfo ti(type, dimension, scale, notnull, kENCODING_NONE, 0, subtype);
+      SQLTypeInfoCore ti(type, dimension, scale, notnull, kENCODING_NONE, 0, subtype);
       return ti.get_size();
     }
     if (compression == kENCODING_DICT) {
@@ -247,11 +288,13 @@ class SQLTypeInfo {
     // offsets rather than just a number to loop over,
     // so that executor and non-executor columns can
     // be mixed.
-    // NOTE(adb): In binding to extension functions, we need to know some pretty specific type info about each of the
-    // physical coords cols for each geo type. I added checks there to ensure the physical coords col for the geo type
-    // match what we expect. If these values are ever changed, corresponding values in
+    // NOTE(adb): In binding to extension functions, we need to know some pretty specific
+    // type info about each of the physical coords cols for each geo type. I added checks
+    // there to ensure the physical coords col for the geo type match what we expect. If
+    // these values are ever changed, corresponding values in
     // ExtensionFunctionsBinding.cpp::compute_narrowing_conv_scores and
-    // ExtensionFunctionsBinding.cpp::compute_widening_conv_scores will also need to be changed.
+    // ExtensionFunctionsBinding.cpp::compute_widening_conv_scores will also need to be
+    // changed.
     switch (type) {
       case kPOINT:
         return 1;
@@ -269,6 +312,16 @@ class SQLTypeInfo {
   inline bool has_bounds() const {
     switch (type) {
       case kLINESTRING:
+      case kPOLYGON:
+      case kMULTIPOLYGON:
+        return true;
+      default:
+        break;
+    }
+    return false;
+  }
+  inline bool has_render_group() const {
+    switch (type) {
       case kPOLYGON:
       case kMULTIPOLYGON:
         return true;
@@ -297,10 +350,20 @@ class SQLTypeInfo {
         srid_string = ", " + std::to_string(get_output_srid());
       return type_name[(int)subtype] + "(" + type_name[(int)type] + srid_string + ")";
     }
-    std::string ps = (type == kDECIMAL || type == kNUMERIC || subtype == kDECIMAL || subtype == kNUMERIC)
-                         ? "(" + std::to_string(dimension) + "," + std::to_string(scale) + ")"
-                         : "";
-    return (type == kARRAY) ? type_name[(int)subtype] + ps + "[]" : type_name[(int)type] + ps;
+    std::string ps = "";
+    if (type == kDECIMAL || type == kNUMERIC || subtype == kDECIMAL ||
+        subtype == kNUMERIC) {
+      ps = "(" + std::to_string(dimension) + "," + std::to_string(scale) + ")";
+    } else if (type == kTIMESTAMP) {
+      ps = "(" + std::to_string(dimension) + ")";
+    }
+    if (type == kARRAY) {
+      auto num_elems =
+          (size > 0) ? std::to_string(size / (SQLTypeInfoCore(subtype, true).get_size()))
+                     : "";
+      return type_name[(int)subtype] + ps + "[" + num_elems + "]";
+    }
+    return type_name[(int)type] + ps;
   }
   inline std::string get_compression_name() const { return comp_name[(int)compression]; }
 #endif
@@ -313,28 +376,37 @@ class SQLTypeInfo {
   inline bool is_time() const { return IS_TIME(type); }
   inline bool is_boolean() const { return type == kBOOLEAN; }
   inline bool is_array() const { return type == kARRAY; }
-  inline bool is_timeinterval() const { return type == kINTERVAL_DAY_TIME || type == kINTERVAL_YEAR_MONTH; }
+  inline bool is_varlen_array() const { return type == kARRAY && size <= 0; }
+  inline bool is_fixlen_array() const { return type == kARRAY && size > 0; }
+  inline bool is_timeinterval() const {
+    return type == kINTERVAL_DAY_TIME || type == kINTERVAL_YEAR_MONTH;
+  }
   inline bool is_geometry() const { return IS_GEO(type); }
 
-  inline bool is_varlen() const {
-    return (IS_STRING(type) && compression != kENCODING_DICT) || type == kARRAY || IS_GEO(type);
+  inline bool is_varlen() const {  // TODO: logically this should ignore fixlen arrays
+    return (IS_STRING(type) && compression != kENCODING_DICT) || type == kARRAY ||
+           IS_GEO(type);
   }
 
-  HOST DEVICE inline bool operator!=(const SQLTypeInfo& rhs) const {
-    return type != rhs.get_type() || subtype != rhs.get_subtype() || dimension != rhs.get_dimension() ||
-           scale != rhs.get_scale() || compression != rhs.get_compression() ||
+  HOST DEVICE inline bool operator!=(const SQLTypeInfoCore& rhs) const {
+    return type != rhs.get_type() || subtype != rhs.get_subtype() ||
+           dimension != rhs.get_dimension() || scale != rhs.get_scale() ||
+           compression != rhs.get_compression() ||
            (compression != kENCODING_NONE && comp_param != rhs.get_comp_param() &&
             comp_param != TRANSIENT_DICT(rhs.get_comp_param())) ||
            notnull != rhs.get_notnull();
   }
-  HOST DEVICE inline bool operator==(const SQLTypeInfo& rhs) const {
-    return type == rhs.get_type() && subtype == rhs.get_subtype() && dimension == rhs.get_dimension() &&
-           scale == rhs.get_scale() && compression == rhs.get_compression() &&
+  HOST DEVICE inline bool operator==(const SQLTypeInfoCore& rhs) const {
+    return type == rhs.get_type() && subtype == rhs.get_subtype() &&
+           dimension == rhs.get_dimension() && scale == rhs.get_scale() &&
+           compression == rhs.get_compression() &&
            (compression == kENCODING_NONE || comp_param == rhs.get_comp_param() ||
             comp_param == TRANSIENT_DICT(rhs.get_comp_param())) &&
            notnull == rhs.get_notnull();
   }
-  HOST DEVICE inline void operator=(const SQLTypeInfo& rhs) {
+
+  // FIX-ME:  Work through variadic base classes
+  HOST DEVICE inline SQLTypeInfoCore& operator=(const SQLTypeInfoCore& rhs) {
     type = rhs.get_type();
     subtype = rhs.get_subtype();
     dimension = rhs.get_dimension();
@@ -343,8 +415,10 @@ class SQLTypeInfo {
     compression = rhs.get_compression();
     comp_param = rhs.get_comp_param();
     size = rhs.get_size();
+    return (*this);
   }
-  inline bool is_castable(const SQLTypeInfo& new_type_info) const {
+
+  inline bool is_castable(const SQLTypeInfoCore& new_type_info) const {
     // can always cast between the same type but different precision/scale/encodings
     if (type == new_type_info.get_type())
       return true;
@@ -436,11 +510,13 @@ class SQLTypeInfo {
     }
     return false;
   }
-  inline SQLTypeInfo get_elem_type() const {
-    return SQLTypeInfo(subtype, dimension, scale, notnull, compression, comp_param, kNULLT);
+  inline SQLTypeInfoCore get_elem_type() const {
+    return SQLTypeInfoCore(
+        subtype, dimension, scale, notnull, compression, comp_param, kNULLT);
   }
-  inline SQLTypeInfo get_array_type() const {
-    return SQLTypeInfo(kARRAY, dimension, scale, notnull, compression, comp_param, type);
+  inline SQLTypeInfoCore get_array_type() const {
+    return SQLTypeInfoCore(
+        kARRAY, dimension, scale, notnull, compression, comp_param, type);
   }
 
  private:
@@ -534,10 +610,8 @@ class SQLTypeInfo {
             assert(false);
         }
         break;
-      case kTIME:
       case kTIMESTAMP:
-        if (dimension > 0)
-          assert(false);  // not supported yet
+      case kTIME:
       case kINTERVAL_DAY_TIME:
       case kINTERVAL_YEAR_MONTH:
       case kDATE:
@@ -545,6 +619,9 @@ class SQLTypeInfo {
           case kENCODING_NONE:
             return sizeof(time_t);
           case kENCODING_FIXED:
+            if (type == kTIMESTAMP && dimension > 0) {
+              assert(false);  // disable compression for timestamp precisions
+            }
             return comp_param / 8;
           case kENCODING_RL:
           case kENCODING_DIFF:
@@ -561,6 +638,9 @@ class SQLTypeInfo {
         if (compression == kENCODING_DICT)
           return sizeof(int32_t);  // @TODO(wei) must check DictDescriptor
         break;
+      case kARRAY:
+        // TODO: return size for fixlen arrays?
+        break;
       case kPOINT:
       case kLINESTRING:
       case kPOLYGON:
@@ -573,6 +653,43 @@ class SQLTypeInfo {
   }
 };
 
+#ifndef __CUDACC__
+// todo:  Get rid of preprocessor definition and move into Cuda Type Concept
+template <template <class> class... TYPE_FACET_PACK>
+std::string SQLTypeInfoCore<TYPE_FACET_PACK...>::type_name[kSQLTYPE_LAST] = {
+    "NULL",
+    "BOOLEAN",
+    "CHAR",
+    "VARCHAR",
+    "NUMERIC",
+    "DECIMAL",
+    "INTEGER",
+    "SMALLINT",
+    "FLOAT",
+    "DOUBLE",
+    "TIME",
+    "TIMESTAMP",
+    "BIGINT",
+    "TEXT",
+    "DATE",
+    "ARRAY",
+    "INTERVAL_DAY_TIME",
+    "INTERVAL_YEAR_MONTH",
+    "POINT",
+    "LINESTRING",
+    "POLYGON",
+    "MULTIPOLYGON",
+    "TINYINT",
+    "GEOMETRY",
+    "GEOGRAPHY"};
+
+template <template <class> class... TYPE_FACET_PACK>
+std::string SQLTypeInfoCore<TYPE_FACET_PACK...>::comp_name[kENCODING_LAST] =
+    {"NONE", "FIXED", "RL", "DIFF", "DICT", "SPARSE", "COMPRESSED"};
+#endif
+
+using SQLTypeInfo = SQLTypeInfoCore<ArrayContextTypeSizer, ExecutorTypePackaging>;
+
 SQLTypes decimal_to_int_type(const SQLTypeInfo&);
 
 #ifndef __CUDACC__
@@ -583,32 +700,34 @@ int64_t convert_decimal_value_to_scale(const int64_t decimal_value,
                                        const SQLTypeInfo& new_type_info);
 #endif
 
-#include "../QueryEngine/ExtractFromTime.h"
-#include "../QueryEngine/DateTruncate.h"
 #include "../QueryEngine/DateAdd.h"
+#include "../QueryEngine/DateTruncate.h"
+#include "../QueryEngine/ExtractFromTime.h"
 
 inline SQLTypeInfo get_logical_type_info(const SQLTypeInfo& type_info) {
   EncodingType encoding = type_info.get_compression();
-  if (encoding == kENCODING_FIXED) {
+  if (encoding == kENCODING_FIXED && (type_info.get_type() != kARRAY)) {
     encoding = kENCODING_NONE;
   }
   return SQLTypeInfo(type_info.get_type(),
                      type_info.get_dimension(),
                      type_info.get_scale(),
-                     false,
+                     type_info.get_notnull(),
                      encoding,
-                     0,
+                     type_info.get_comp_param(),
                      type_info.get_subtype());
 }
 
 template <class T>
 inline int64_t inline_int_null_value() {
-  return std::is_signed<T>::value ? std::numeric_limits<T>::min() : std::numeric_limits<T>::max();
+  return std::is_signed<T>::value ? std::numeric_limits<T>::min()
+                                  : std::numeric_limits<T>::max();
 }
 
 template <class T>
 inline int64_t max_valid_int_value() {
-  return std::is_signed<T>::value ? std::numeric_limits<T>::max() : std::numeric_limits<T>::max() - 1;
+  return std::is_signed<T>::value ? std::numeric_limits<T>::max()
+                                  : std::numeric_limits<T>::max() - 1;
 }
 
 template <typename T>

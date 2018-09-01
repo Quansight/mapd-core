@@ -94,6 +94,23 @@ Finally run the tests:
 
     make sanity_tests
 
+# Generating Packages
+
+MapD Core uses [CPack](https://cmake.org/cmake/help/latest/manual/cpack.1.html) to generate packages for distribution. Packages generated on CentOS with static linking enabled can be used on most other recent Linux distributions.
+
+To generate packages on CentOS (assuming starting from top level of the mapd-core repository):
+
+    mkdir build-package && cd build-package
+    cmake -DPREFER_STATIC_LIBS=on -DCMAKE_BUILD_TYPE=release ..
+    make -j 4
+    cpack -G TGZ
+
+The first command creates a fresh build directory, to ensure there is nothing left over from a previous build.
+
+The second command configures the build to prefer linking to the dependencies' static libraries instead of the (default) shared libraries, and to build using CMake's `release` configuration (enables compiler optimizations). Linking to the static versions of the libraries libraries reduces the number of dependencies that must be installed on target systems.
+
+The last command generates a `.tar.gz` package. The `TGZ` can be replaced with, for example, `RPM` or `DEB` to generate a `.rpm` or `.deb`, respectively.
+
 # Using
 
 The [`startmapd`](startmapd) wrapper script may be used to start MapD Core in a testing environment. This script performs the following tasks:
@@ -142,13 +159,13 @@ Note: usage of MapD Immerse is governed by a separate license agreement, provide
 
 # Code Style
 
-A [`.clang-format`](http://clang.llvm.org/docs/ClangFormat.html) style configuration, based on the Chromium style guide, is provided at the top level of the repository. Please format your code using a recent version (3.8+) of ClangFormat before submitting.
+A [`.clang-format`](http://clang.llvm.org/docs/ClangFormat.html) style configuration, based on the Chromium style guide, is provided at the top level of the repository. Please format your code using a recent version (6.0+ preferred) of ClangFormat before submitting.
 
 To use:
 
     clang-format -i File.cpp
 
-Contributed code should compile without generating warnings by recent compilers (gcc 4.9, gcc 5.3, clang 3.8) on most Linux distributions. Changes to the code should follow the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines).
+Contributed code should compile without generating warnings by recent compilers on most Linux distributions. Changes to the code should follow the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines).
 
 # Dependencies
 
@@ -157,12 +174,12 @@ MapD has the following dependencies:
 | Package | Min Version | Required |
 | ------- | ----------- | -------- |
 | [CMake](https://cmake.org/) | 3.3 | yes |
-| [LLVM](http://llvm.org/) | 3.8-4.0 | yes |
-| [GCC](http://gcc.gnu.org/) | 4.9 | no, if building with clang |
+| [LLVM](http://llvm.org/) | 3.8-4.0, 6.0 | yes |
+| [GCC](http://gcc.gnu.org/) | 5.1 | no, if building with clang |
 | [Go](https://golang.org/) | 1.6 | yes |
-| [Boost](http://www.boost.org/) | 1.57.0 | yes |
+| [Boost](http://www.boost.org/) | 1.65.0 | yes |
 | [OpenJDK](http://openjdk.java.net/) | 1.7 | yes |
-| [CUDA](http://nvidia.com/cuda) | 7.5 | yes, if compiling with GPU support |
+| [CUDA](http://nvidia.com/cuda) | 8.0 | yes, if compiling with GPU support |
 | [gperftools](https://github.com/gperftools/gperftools) | | yes |
 | [gdal](http://gdal.org/) | | yes |
 | [Arrow](https://arrow.apache.org/) | 0.7.0 | yes |
@@ -196,7 +213,7 @@ First install the basic build tools:
 
 Next download and install the prebuilt dependencies:
 
-    curl -OJ https://internal-dependencies.mapd.com/mapd-deps/deploy.sh
+    curl -OJ https://dependencies.mapd.com/mapd-deps/deploy.sh
     sudo bash deploy.sh
 
 These dependencies will be installed to a directory under `/usr/local/mapd-deps`. The `deploy.sh` script also installs [Environment Modules](http://modules.sf.net) in order to simplify managing the required environment variables. Log out and log back in after running the `deploy.sh` script in order to active Environment Modules command, `module`.
@@ -239,9 +256,26 @@ Be sure to reboot after installing in order to activate the NVIDIA drivers.
 
 `mapd-deps-osx.sh` will automatically install Java and Maven via Homebrew and add the correct environment variables to `~/.bash_profile`.
 
-## Ubuntu 16.04 - 17.10
+## Ubuntu
 
-Most build dependencies required by MapD Core are available via APT. Certain dependencies such as Thrift, Blosc, and Folly must be built as they either do not exist in the default repositories or have outdated versions. The provided [scripts/mapd-deps-ubuntu.sh](scripts/mapd-deps-ubuntu.sh) script will install all required dependencies (except CUDA) and build the dependencies which require it. The built dependencies will be installed to `/usr/local/mapd-deps/` by default; see the Environment Variables section below for how to add these dependencies to your environment.
+Most build dependencies required by MapD Core are available via APT. Certain dependencies such as Thrift, Blosc, and Folly must be built as they either do not exist in the default repositories or have outdated versions. The provided build script will install all required dependencies (except CUDA) and build the dependencies which require it. The built dependencies will be installed to `/usr/local/mapd-deps/` by default; see the Environment Variables section below for how to add these dependencies to your environment.
+
+### Ubuntu 16.04
+
+MapD Core requires a newer version of Boost than the version which is provided by Ubuntu 16.04. The [scripts/mapd-deps-ubuntu1604.sh](scripts/mapd-deps-ubuntu1604.sh) build script will compile and install a newer version of Boost into the `/usr/local/mapd-deps/` directory. 
+
+### Ubuntu 18.04
+
+Use the [scripts/mapd-deps-ubuntu.sh](scripts/mapd-deps-ubuntu.sh) build script to install dependencies. 
+
+Some installs of Ubuntu 18.04 may fail while building with a message similar to:
+
+    java.security.InvalidAlgorithmParameterException: the trustAnchors parameter must be non-empty
+
+This is a known issue in 18.04 which will be resolved in [Ubuntu 18.04.1](https://bugs.launchpad.net/ubuntu/+source/ca-certificates-java/+bug/1739631). To resolve on 18.04:
+
+    sudo rm /etc/ssl/certs/java/cacerts
+    sudo update-ca-certificates -f
 
 ### Environment Variables
 

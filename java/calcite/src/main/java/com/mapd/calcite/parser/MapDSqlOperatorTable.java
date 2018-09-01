@@ -15,11 +15,14 @@
  */
 package com.mapd.calcite.parser;
 
+import java.lang.reflect.Field;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Multimap;
 import com.mapd.parser.server.ExtensionFunction;
 import java.util.List;
 import org.apache.calcite.rel.type.RelDataType;
@@ -33,11 +36,13 @@ import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlOperatorBinding;
 import org.apache.calcite.sql.SqlOperatorTable;
 import org.apache.calcite.sql.SqlSyntax;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.util.ChainedSqlOperatorTable;
 import org.apache.calcite.sql.util.ListSqlOperatorTable;
+import org.apache.calcite.sql.util.ReflectiveSqlOperatorTable;
 
 class CaseInsensitiveListSqlOperatorTable extends ListSqlOperatorTable {
 
@@ -74,6 +79,27 @@ class CaseInsensitiveListSqlOperatorTable extends ListSqlOperatorTable {
  * @author michael
  */
 public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
+
+  static {
+    try {
+      // some nasty bit to remove the std APPROX_COUNT_DISTINCT function definition
+      
+      Field f = ReflectiveSqlOperatorTable.class.getDeclaredField("operators");
+      f.setAccessible(true);
+      Multimap operators = (Multimap) f.get(SqlStdOperatorTable.instance());
+      for (Iterator i = operators.entries().iterator(); i.hasNext(); ) {
+        Map.Entry entry = (Map.Entry) i.next();
+        if (entry.getValue() == SqlStdOperatorTable.APPROX_COUNT_DISTINCT) {
+          i.remove();
+        }
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+    
+    // register our approx count distinct against std table
+    SqlStdOperatorTable.instance().register(new ApproxCountDistinct());
+  }
 
   /**
    * Mock operator table for testing purposes. Contains the standard SQL
@@ -123,6 +149,7 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     opTab.addOperator(new Sign());
     opTab.addOperator(new Truncate());
     opTab.addOperator(new ST_Contains());
+    opTab.addOperator(new ST_Within());
     opTab.addOperator(new ST_Distance());
     opTab.addOperator(new ST_GeogFromText());
     opTab.addOperator(new ST_GeomFromText());
@@ -136,6 +163,9 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     opTab.addOperator(new ST_PointN());
     opTab.addOperator(new ST_StartPoint());
     opTab.addOperator(new ST_EndPoint());
+    opTab.addOperator(new ST_Length());
+    opTab.addOperator(new ST_Perimeter());
+    opTab.addOperator(new ST_Area());
     opTab.addOperator(new ST_NPoints());
     opTab.addOperator(new ST_NRings());
     opTab.addOperator(new ST_SRID());
@@ -143,7 +173,10 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     opTab.addOperator(new CastToGeography());
     opTab.addOperator(new OffsetInFragment());
     opTab.addOperator(new ApproxCountDistinct());
+    opTab.addOperator(new Sample());
     opTab.addOperator(new LastSample());
+    opTab.addOperator(new MapD_GeoPolyBoundsPtr());
+    opTab.addOperator(new MapD_GeoPolyRenderGroup());
     if (extSigs == null) {
       return;
     }
@@ -642,6 +675,28 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     }
   }
 
+  static class ST_Within extends SqlFunction {
+
+    ST_Within() {
+      super("ST_Within", SqlKind.OTHER_FUNCTION, null, null, OperandTypes.family(signature()), SqlFunctionCategory.SYSTEM);
+    }
+
+    @Override
+    public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+      assert opBinding.getOperandCount() == 2;
+      final RelDataTypeFactory typeFactory
+              = opBinding.getTypeFactory();
+      return typeFactory.createSqlType(SqlTypeName.BOOLEAN);
+    }
+
+    private static java.util.List<SqlTypeFamily> signature() {
+      java.util.List<SqlTypeFamily> st_within_sig = new java.util.ArrayList<SqlTypeFamily>();
+      st_within_sig.add(SqlTypeFamily.ANY);
+      st_within_sig.add(SqlTypeFamily.ANY);
+      return st_within_sig;
+    }
+  }
+
   static class ST_Distance extends SqlFunction {
 
     ST_Distance() {
@@ -908,6 +963,66 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     }
   }
 
+  static class ST_Length extends SqlFunction {
+
+    ST_Length() {
+      super("ST_Length",
+              SqlKind.OTHER_FUNCTION,
+              null,
+              null,
+              OperandTypes.family(SqlTypeFamily.ANY),
+              SqlFunctionCategory.SYSTEM);
+    }
+
+    @Override
+    public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+      assert opBinding.getOperandCount() == 1;
+      final RelDataTypeFactory typeFactory
+              = opBinding.getTypeFactory();
+      return typeFactory.createSqlType(SqlTypeName.DOUBLE);
+    }
+  }
+
+  static class ST_Perimeter extends SqlFunction {
+
+    ST_Perimeter() {
+      super("ST_Perimeter",
+              SqlKind.OTHER_FUNCTION,
+              null,
+              null,
+              OperandTypes.family(SqlTypeFamily.ANY),
+              SqlFunctionCategory.SYSTEM);
+    }
+
+    @Override
+    public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+      assert opBinding.getOperandCount() == 1;
+      final RelDataTypeFactory typeFactory
+              = opBinding.getTypeFactory();
+      return typeFactory.createSqlType(SqlTypeName.DOUBLE);
+    }
+  }
+
+  static class ST_Area extends SqlFunction {
+
+    ST_Area() {
+      super("ST_Area",
+              SqlKind.OTHER_FUNCTION,
+              null,
+              null,
+              OperandTypes.family(SqlTypeFamily.ANY),
+              SqlFunctionCategory.SYSTEM);
+    }
+
+    @Override
+    public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+      assert opBinding.getOperandCount() == 1;
+      final RelDataTypeFactory typeFactory
+              = opBinding.getTypeFactory();
+      return typeFactory.createSqlType(SqlTypeName.DOUBLE);
+    }
+  }
+
   static class ST_NPoints extends SqlFunction {
     
     ST_NPoints() {
@@ -1051,8 +1166,26 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     }
   }
 
-  public static class LastSample extends SqlAggFunction {
+  public static class Sample extends SqlAggFunction {
 
+    public Sample() {
+      super("SAMPLE",
+              SqlKind.OTHER_FUNCTION,
+              null,
+              null,
+              OperandTypes.ANY,
+              SqlFunctionCategory.SYSTEM);
+    }
+
+    @Override
+    public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+      return opBinding.getOperandType(0);
+    }
+  }
+
+  // for backwards compatibility
+  public static class LastSample extends SqlAggFunction {
+    
     public LastSample() {
       super("LAST_SAMPLE",
               SqlKind.OTHER_FUNCTION,
@@ -1066,6 +1199,7 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
       return opBinding.getOperandType(0);
     }
+  
   }
 
   static class ExtFunction extends SqlFunction {
@@ -1136,6 +1270,50 @@ public class MapDSqlOperatorTable extends ChainedSqlOperatorTable {
     }
 
     private final SqlTypeName ret;
+  }
+
+  //
+  // Internal accessors for in-situ poly render queries
+  //
+
+  static class MapD_GeoPolyBoundsPtr extends SqlFunction {
+    
+    MapD_GeoPolyBoundsPtr() {
+      super("MapD_GeoPolyBoundsPtr",
+              SqlKind.OTHER_FUNCTION,
+              null,
+              null,
+              OperandTypes.family(SqlTypeFamily.ANY),
+              SqlFunctionCategory.SYSTEM);
+    }
+
+    @Override
+    public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+      assert opBinding.getOperandCount() == 1;
+      final RelDataTypeFactory typeFactory
+             = opBinding.getTypeFactory();
+      return typeFactory.createSqlType(SqlTypeName.BIGINT);
+    }
+  }
+
+  static class MapD_GeoPolyRenderGroup extends SqlFunction {
+    
+    MapD_GeoPolyRenderGroup() {
+      super("MapD_GeoPolyRenderGroup",
+              SqlKind.OTHER_FUNCTION,
+              null,
+              null,
+              OperandTypes.family(SqlTypeFamily.ANY),
+              SqlFunctionCategory.SYSTEM);
+    }
+
+    @Override
+    public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+      assert opBinding.getOperandCount() == 1;
+      final RelDataTypeFactory typeFactory
+             = opBinding.getTypeFactory();
+      return typeFactory.createSqlType(SqlTypeName.INTEGER);
+    }
   }
 }
 

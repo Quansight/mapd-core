@@ -168,25 +168,38 @@ inline EncodingType thrift_to_encoding(const TEncodingType::type tEncodingType) 
 
 inline std::string thrift_to_name(const TTypeInfo& ti) {
   const auto type = thrift_to_type(ti.type);
-  auto internal_ti =
-      SQLTypeInfo(ti.is_array ? kARRAY : type, 0, 0, !ti.nullable, kENCODING_NONE, 0, ti.is_array ? type : kNULLT);
+  auto internal_ti = SQLTypeInfo(ti.is_array ? kARRAY : type,
+                                 0,
+                                 0,
+                                 !ti.nullable,
+                                 kENCODING_NONE,
+                                 0,
+                                 ti.is_array ? type : kNULLT);
   if (type == kDECIMAL || type == kNUMERIC) {
     internal_ti.set_precision(ti.precision);
     internal_ti.set_scale(ti.scale);
+  } else if (type == kTIMESTAMP) {
+    internal_ti.set_precision(ti.precision);
   }
   if (IS_GEO(type)) {
     internal_ti.set_subtype(static_cast<SQLTypes>(ti.precision));
     internal_ti.set_input_srid(ti.scale);
     internal_ti.set_output_srid(ti.scale);
   }
+  internal_ti.set_size(ti.size);
   return internal_ti.get_type_name();
 }
 
 inline std::string thrift_to_encoding_name(const TTypeInfo& ti) {
   const auto type = thrift_to_type(ti.type);
   const auto encoding = thrift_to_encoding(ti.encoding);
-  auto internal_ti =
-      SQLTypeInfo(ti.is_array ? kARRAY : type, 0, 0, !ti.nullable, encoding, 0, ti.is_array ? type : kNULLT);
+  auto internal_ti = SQLTypeInfo(ti.is_array ? kARRAY : type,
+                                 0,
+                                 0,
+                                 !ti.nullable,
+                                 encoding,
+                                 0,
+                                 ti.is_array ? type : kNULLT);
   return internal_ti.get_compression_name();
 }
 
@@ -202,15 +215,24 @@ inline SQLTypeInfo type_info_from_thrift(const TTypeInfo& thrift_ti) {
                        thrift_ti.comp_param,
                        base_type);
   }
-  const auto base_type = thrift_ti.is_array ? ti : kNULLT;
-  const auto type = thrift_ti.is_array ? kARRAY : ti;
-  return SQLTypeInfo(type,
+  if (thrift_ti.is_array) {
+    auto ati = SQLTypeInfo(kARRAY,
+                           thrift_ti.precision,
+                           thrift_ti.scale,
+                           !thrift_ti.nullable,
+                           thrift_to_encoding(thrift_ti.encoding),
+                           thrift_ti.comp_param,
+                           ti);
+    ati.set_size(thrift_ti.size);
+    return ati;
+  }
+  return SQLTypeInfo(ti,
                      thrift_ti.precision,
                      thrift_ti.scale,
                      !thrift_ti.nullable,
                      thrift_to_encoding(thrift_ti.encoding),
                      thrift_ti.comp_param,
-                     base_type);
+                     kNULLT);
 }
 
 #endif  // THRIFT_TYPE_CONVERT_H

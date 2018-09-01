@@ -18,35 +18,97 @@
 #define QUERY_RUNNER_H
 
 #include "../QueryEngine/CompilationOptions.h"
+#include "LeafAggregator.h"
 
+#include <fstream>
 #include <memory>
 #include <string>
 
 namespace Catalog_Namespace {
 class SessionInfo;
-} // namespace Catalog_Namespace
+class Catalog;
+struct UserMetadata;
+}  // namespace Catalog_Namespace
 
 class ResultSet;
 class ExecutionResult;
 
 namespace QueryRunner {
 
+struct IROutputFile {
+  IROutputFile(const std::string& filename) : filename(filename) {
+    ofs.open(filename, std::ios::trunc);
+  }
+  ~IROutputFile() { ofs.close(); }
+  std::string filename;
+  std::ofstream ofs;
+
+  void operator()(const std::string& query_str, const std::string& ir_str) {
+    ofs << query_str << "\n\n" << ir_str << "\n\n";
+  }
+};
+
+LeafAggregator* get_leaf_aggregator();
+
+Catalog_Namespace::SessionInfo* get_distributed_session(const char* db_path);
+
+Catalog_Namespace::SessionInfo* get_session(
+    const char* db_path,
+    const std::string& user,
+    const std::string& pass,
+    const std::string& db_name,
+    const std::vector<LeafHostInfo>& string_servers,
+    const std::vector<LeafHostInfo>& leaf_servers,
+    bool uses_gpus = true,
+    const bool create_user = false,
+    const bool create_db = false);
+
+Catalog_Namespace::SessionInfo* get_session(
+    const char* db_path,
+    const std::vector<LeafHostInfo>& string_servers,
+    const std::vector<LeafHostInfo>& leaf_servers);
+
 Catalog_Namespace::SessionInfo* get_session(const char* db_path);
 
-ExecutionResult run_select_query(const std::string& query_str,
-                                 const std::unique_ptr<Catalog_Namespace::SessionInfo>& session,
-                                 const ExecutorDeviceType device_type,
-                                 const bool hoist_literals,
-                                 const bool allow_loop_joins);
+Catalog_Namespace::UserMetadata get_user_metadata(
+    const Catalog_Namespace::SessionInfo* session);
 
-std::shared_ptr<ResultSet> run_multiple_agg(const std::string& query_str,
-                                            const std::unique_ptr<Catalog_Namespace::SessionInfo>& session,
-                                            const ExecutorDeviceType device_type,
-                                            const bool hoist_literals,
-                                            const bool allow_loop_joins);
+std::shared_ptr<Catalog_Namespace::Catalog> get_catalog(
+    const Catalog_Namespace::SessionInfo* session);
+
+ExecutionResult run_select_query(
+    const std::string& query_str,
+    const std::unique_ptr<Catalog_Namespace::SessionInfo>& session,
+    const ExecutorDeviceType device_type,
+    const bool hoist_literals,
+    const bool allow_loop_joins,
+    const bool just_explain = false);
+
+ExecutionResult run_select_query_with_filter_push_down(
+    const std::string& query_str,
+    const std::unique_ptr<Catalog_Namespace::SessionInfo>& session,
+    const ExecutorDeviceType device_type,
+    const bool hoist_literals,
+    const bool allow_loop_joins,
+    const bool just_explain,
+    const bool with_filter_push_down);
+
+std::shared_ptr<ResultSet> run_multiple_agg(
+    const std::string& query_str,
+    const std::unique_ptr<Catalog_Namespace::SessionInfo>& session,
+    const ExecutorDeviceType device_type,
+    const bool hoist_literals,
+    const bool allow_loop_joins,
+    const std::unique_ptr<IROutputFile>& ir_output_file = nullptr);
 
 void run_ddl_statement(const std::string& create_table_stmt,
                        const std::unique_ptr<Catalog_Namespace::SessionInfo>& session);
+
+std::shared_ptr<ResultSet> run_sql_distributed(
+    const std::string& query_str,
+    const std::unique_ptr<Catalog_Namespace::SessionInfo>& session,
+    const ExecutorDeviceType device_type,
+    bool allow_loop_joins);
 
 }  // namespace QueryRunner
 

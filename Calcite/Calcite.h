@@ -24,21 +24,26 @@
 #ifndef CALCITE_H
 #define CALCITE_H
 
-#include <thrift/protocol/TBinaryProtocol.h>
-#include <thrift/transport/TSocket.h>
-#include <thrift/transport/TTransportUtils.h>
+#include <string>
 #include <thread>
-#include "gen-cpp/CalciteServer.h"
+#include <vector>
 #include "rapidjson/document.h"
 
 namespace Catalog_Namespace {
 class SessionInfo;
 }
 
+// Forward declares for Thrift-generated classes
+class TFilterPushDownInfo;
+class TPlanResult;
+class TCompletionHint;
 
 class Calcite {
  public:
-  Calcite(const int mapd_port, const int port, const std::string& data_dir, const size_t calcite_max_mem)
+  Calcite(const int mapd_port,
+          const int port,
+          const std::string& data_dir,
+          const size_t calcite_max_mem)
       : Calcite(mapd_port, port, data_dir, calcite_max_mem, ""){};
   Calcite(const int mapd_port,
           const int port,
@@ -47,22 +52,29 @@ class Calcite {
           const std::string& session_prefix);
   TPlanResult process(const Catalog_Namespace::SessionInfo& session_info,
                       const std::string sql_string,
+                      const std::vector<TFilterPushDownInfo>& filter_push_down_info,
                       const bool legacy_syntax,
                       const bool is_explain);
-  std::vector<TCompletionHint> getCompletionHints(const Catalog_Namespace::SessionInfo& session_info,
-                                                  const std::vector<std::string>& visible_tables,
-                                                  const std::string sql_string,
-                                                  const int cursor);
+  std::vector<TCompletionHint> getCompletionHints(
+      const Catalog_Namespace::SessionInfo& session_info,
+      const std::vector<std::string>& visible_tables,
+      const std::string sql_string,
+      const int cursor);
   std::string getExtensionFunctionWhitelist();
   void updateMetadata(std::string catalog, std::string table);
+  void close_calcite_server();
   virtual ~Calcite();
 
   std::string& get_session_prefix() { return session_prefix_; }
 
  private:
-  void runServer(const int mapd_port, const int port, const std::string& data_dir, const size_t calcite_max_mem);
+  void runServer(const int mapd_port,
+                 const int port,
+                 const std::string& data_dir,
+                 const size_t calcite_max_mem);
   TPlanResult processImpl(const Catalog_Namespace::SessionInfo& session_info,
                           const std::string sql_string,
+                          const std::vector<TFilterPushDownInfo>& filter_push_down_info,
                           const bool legacy_syntax,
                           const bool is_explain);
   std::vector<std::string> get_db_objects(const std::string ra);

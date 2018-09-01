@@ -14,13 +14,9 @@
  * limitations under the License.
  */
 
-#include "../../RelAlgExecutor.h"
+#ifndef SHARED_SHARDKEY_H_
+#define SHARED_SHARDKEY_H_
 
-ExecutionResult RelAlgExecutor::renderWorkUnit(const RelAlgExecutor::WorkUnit& work_unit,
-                                               const std::vector<TargetMetaInfo>& targets_meta,
-                                               RenderInfo* render_info,
-                                               const int32_t error_code,
-                                               const int64_t queue_time_ms) {
-  CHECK(false);
-  return ExecutionResult(std::shared_ptr<ResultSet>(nullptr), {});
-}
+#define SHARD_FOR_KEY(key, num_shards) ((key % num_shards + num_shards) % num_shards)
+
+#endif  // SHARED_SHARDKEY_H_
