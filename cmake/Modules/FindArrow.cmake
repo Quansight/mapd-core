@@ -85,5 +85,9 @@ try_compile(HAVE_ARROW_APPENDVALUES
   COMPILE_DEFINITIONS -I${Arrow_INCLUDE_DIRS}
   LINK_LIBRARIES ${Arrow_LIBRARY})
 
+set(HAVE_ARROW_STATIC_RECORDBATCH_CTOR TRUE)
+set(HAVE_ARROW_APPENDVALUES TRUE)
+
+
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(Arrow REQUIRED_VARS Arrow_LIBRARY)

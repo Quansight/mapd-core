@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 
-if("${CMAKE_VERSION}" VERSION_GREATER_EQUAL 3.12.0)
-  cmake_policy(SET CMP0074 NEW)
-endif()
+#if("${CMAKE_VERSION}" VERSION_GREATER_EQUAL 3.12.0)
+#  cmake_policy(SET CMP0074 NEW)
+#endif()
 
 find_program(CCACHE_EXE ccache)
 if(CCACHE_EXE)
@@ -432,6 +432,8 @@ if (ENABLE_TESTS)
   add_subdirectory(Tests)
   add_subdirectory(SampleCode)
 endif()
+
+list(APPEND MAPD_LIBRARIES crypto ssl)
 
 set(initdb_source_files initdb.cpp)
 add_executable(initdb ${initdb_source_files})
